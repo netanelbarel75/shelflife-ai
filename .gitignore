@@ -1,0 +1,179 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.*.local
+
+# React Native
+.expo/
+.expo-shared/
+*.orig.*
+web-build/
+ios/
+android/
+.react-native-builds/
+
+# Expo
+npm-debug.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+web-build/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+pgdata/
+redis-data/
+
+# Docker
+.docker-data/
+
+# Logs
+logs/
+*.log
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Machine Learning
+*.pkl
+*.joblib
+models/*.pkl
+models/*.joblib
+data/raw/
+data/processed/
+data/external/
+experiments/
+.mlflow/
+mlruns/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Test files
+.coverage
+.nyc_output
+coverage/
+
+# Build outputs
+dist/
+build/
+*.tgz
+*.tar.gz
+
+# Backup files
+*.backup
+*~
+.#*
+#*#
+
+# Local configuration files
+config.local.json
+secrets.json
+
+# Documentation build
+docs/_build/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json

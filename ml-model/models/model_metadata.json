@@ -1,0 +1,17 @@
+{
+  "model_type": "gradient_boosting",
+  "test_r2": 0.7583942645489916,
+  "test_mae": 70.54366221877487,
+  "cv_mean": 0.7445628245018234,
+  "cv_std": 0.03395978629238854,
+  "features": [
+    "category",
+    "storage_location",
+    "brand_type",
+    "is_organic",
+    "purchase_season",
+    "temperature_avg"
+  ],
+  "trained_at": "2025-07-20T08:40:20.262662",
+  "version": "1.0.0"
+}

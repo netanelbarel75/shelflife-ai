@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "ShelfLife.AI",
+    "slug": "shelflife-ai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#4CAF50"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app needs access to camera to scan receipts",
+        "NSPhotoLibraryUsageDescription": "This app needs access to photo library to save and load receipt images",
+        "NSLocationWhenInUseUsageDescription": "This app needs location to show nearby food items and enable local marketplace",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app needs location to show nearby food items and enable local marketplace"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#4CAF50"
+      },
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-camera",
+      "expo-image-picker",
+      "expo-location"
+    ]
+  }
+}

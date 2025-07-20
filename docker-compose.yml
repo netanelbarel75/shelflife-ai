@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:14-alpine
+    container_name: shelflife-postgres
+    environment:
+      POSTGRES_DB: shelflife_db
+      POSTGRES_USER: shelflife_user
+      POSTGRES_PASSWORD: shelflife_pass
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - shelflife-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shelflife_user -d shelflife_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: shelflife-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - shelflife-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Optional: pgAdmin for database management (development only)
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: shelflife-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@shelflife.ai
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - shelflife-network
+    profiles:
+      - tools
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  shelflife-network:
+    driver: bridge

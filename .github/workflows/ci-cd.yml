@@ -1,0 +1,223 @@
+name: ShelfLife.AI CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  NODE_VERSION: '18'
+  PYTHON_VERSION: '3.9'
+
+jobs:
+  # Backend Tests
+  backend-test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: shelflife_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+          
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
+
+    - name: Cache Python dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('backend/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install Python dependencies
+      run: |
+        cd backend
+        pip install -r requirements.txt
+
+    - name: Run backend linting
+      run: |
+        cd backend
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        black --check .
+        isort --check-only .
+
+    - name: Run backend tests
+      env:
+        DATABASE_URL: postgresql://postgres:password@localhost:5432/shelflife_test
+        REDIS_URL: redis://localhost:6379/0
+        SECRET_KEY: test-secret-key
+        TESSERACT_PATH: /usr/bin/tesseract
+      run: |
+        cd backend
+        pytest --cov=app --cov-report=xml tests/
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: backend/coverage.xml
+        flags: backend
+        name: backend-coverage
+
+  # Mobile App Tests
+  mobile-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+
+    - name: Cache Node.js dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.npm
+        key: ${{ runner.os }}-node-${{ hashFiles('mobile-app/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
+
+    - name: Install mobile dependencies
+      run: |
+        cd mobile-app
+        npm ci
+
+    - name: Run mobile linting
+      run: |
+        cd mobile-app
+        npm run lint
+
+    - name: Run mobile tests
+      run: |
+        cd mobile-app
+        npm test
+
+    - name: Build mobile app
+      run: |
+        cd mobile-app
+        npm run build
+
+  # ML Model Training and Testing
+  ml-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install ML dependencies
+      run: |
+        cd ml-model
+        pip install pandas numpy scikit-learn lightgbm joblib
+
+    - name: Train and test ML model
+      run: |
+        cd ml-model
+        python train.py --samples 1000
+
+    - name: Upload model artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: ml-models
+        path: ml-model/models/
+
+  # Build and Push Docker Images
+  docker-build:
+    needs: [backend-test, mobile-test, ml-test]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: Login to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Build and push backend image
+      uses: docker/build-push-action@v4
+      with:
+        context: ./backend
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: |
+          shelflife/backend:latest
+          shelflife/backend:${{ github.sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  # Deploy to Production (only on main branch)
+  deploy:
+    needs: docker-build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Deploy to production
+      env:
+        KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+      run: |
+        echo "Deploying to production..."
+        # Add your deployment commands here
+        # kubectl set image deployment/shelflife-backend backend=shelflife/backend:${{ github.sha }}
+
+  # Security Scanning
+  security-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: 'trivy-results.sarif'
