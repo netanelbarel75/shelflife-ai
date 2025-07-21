@@ -1,80 +1,316 @@
-from pydantic import BaseModel, EmailStr, Field, validator
-from typing import Optional, List
+from pydantic import BaseModel, EmailStr, Field
+from typing import Optional, List, Any, Dict
 from datetime import datetime
-from uuid import UUID
-import enum
+from decimal import Decimal
+from enum import Enum
 
-class ItemStatus(str, enum.Enum):
-    FRESH = "fresh"
-    NEARING = "nearing"
-    EXPIRED = "expired"
-    USED = "used"
+# === Base Response Schema ===
+class APIResponse(BaseModel):
+    success: bool
+    message: str
+    data: Optional[Any] = None
 
-class ItemSource(str, enum.Enum):
-    RECEIPT = "receipt"
-    PHOTO = "photo"
-    MANUAL = "manual"
-
-class ListingStatus(str, enum.Enum):
-    ACTIVE = "active"
-    SOLD = "sold"
-    EXPIRED = "expired"
-    REMOVED = "removed"
-
-# Base schemas
-class BaseSchema(BaseModel):
-    class Config:
-        from_attributes = True
-
-# User schemas
-class UserBase(BaseSchema):
+# === User Schemas ===
+class UserBase(BaseModel):
     email: EmailStr
     username: str
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    phone: Optional[str] = None
+    full_name: Optional[str] = None  # Computed field
+    profile_image_url: Optional[str] = None
+    is_active: bool = True
+    is_google_user: bool = False
+    
+    @property
+    def computed_full_name(self) -> Optional[str]:
+        """Compute full name from first_name and last_name."""
+        if self.first_name and self.last_name:
+            return f"{self.first_name} {self.last_name}"
+        elif self.first_name:
+            return self.first_name
+        elif self.last_name:
+            return self.last_name
+        return None
 
 class UserCreate(UserBase):
-    password: str = Field(..., min_length=8)
-
-class UserUpdate(BaseSchema):
+    password: Optional[str] = None  # Optional for Google users
+    
+    # Override to make first_name and last_name available during creation
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+
+class UserUpdate(BaseModel):
+    username: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    full_name: Optional[str] = None
+    profile_image_url: Optional[str] = None
+
+class UserInDB(UserBase):
+    id: str
+    hashed_password: Optional[str] = None
+    google_id: Optional[str] = None
     phone: Optional[str] = None
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
     city: Optional[str] = None
     state: Optional[str] = None
     country: Optional[str] = None
-
-class UserInDB(UserBase):
-    id: UUID
-    is_active: bool
-    is_verified: bool
-    created_at: datetime
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    is_verified: bool = False
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+
+class User(UserBase):
+    id: str
+    phone: Optional[str] = None
     city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    is_verified: bool = False
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    
+    @classmethod
+    def from_orm_with_full_name(cls, db_user):
+        """Create User schema with computed full_name from ORM model."""
+        user_data = {
+            "id": str(db_user.id),
+            "email": db_user.email,
+            "username": db_user.username,
+            "first_name": db_user.first_name,
+            "last_name": db_user.last_name,
+            "profile_image_url": getattr(db_user, 'profile_image_url', None),
+            "is_active": db_user.is_active,
+            "is_google_user": getattr(db_user, 'is_google_user', False),
+            "phone": db_user.phone,
+            "city": db_user.city,
+            "state": db_user.state,
+            "country": db_user.country,
+            "latitude": db_user.latitude,
+            "longitude": db_user.longitude,
+            "is_verified": db_user.is_verified,
+            "created_at": db_user.created_at,
+            "updated_at": db_user.updated_at
+        }
+        
+        # Compute full_name
+        if db_user.first_name and db_user.last_name:
+            user_data["full_name"] = f"{db_user.first_name} {db_user.last_name}"
+        elif db_user.first_name:
+            user_data["full_name"] = db_user.first_name
+        elif db_user.last_name:
+            user_data["full_name"] = db_user.last_name
+        else:
+            user_data["full_name"] = None
+            
+        return cls(**user_data)
+    
+    class Config:
+        from_attributes = True
 
-class User(UserInDB):
-    pass
-
-# Auth schemas
-class Token(BaseSchema):
-    access_token: str
-    token_type: str
-    expires_in: int
-    refresh_token: Optional[str] = None
-
-class TokenData(BaseSchema):
-    user_id: Optional[UUID] = None
-
-class LoginRequest(BaseSchema):
+# === Auth Schemas ===
+class LoginRequest(BaseModel):
     email: EmailStr
     password: str
 
-# Receipt schemas
-class ReceiptBase(BaseSchema):
+class GoogleLoginRequest(BaseModel):
+    id_token: str
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    refresh_token: Optional[str] = None
+    user: Optional[User] = None
+
+# === Inventory Schemas ===
+class InventoryItemBase(BaseModel):
+    name: str
+    category: str
+    brand: Optional[str] = None
+    quantity: float
+    unit: str
+    purchase_date: datetime
+    predicted_expiry_date: Optional[datetime] = None
+    notes: Optional[str] = None
+    estimated_price: Optional[Decimal] = None
+    storage_location: Optional[str] = "fridge"
+    source: str = "manual"  # manual, receipt, photo
+
+class InventoryItemCreate(InventoryItemBase):
+    pass
+
+class InventoryItemUpdate(BaseModel):
+    name: Optional[str] = None
+    category: Optional[str] = None
+    brand: Optional[str] = None
+    quantity: Optional[float] = None
+    unit: Optional[str] = None
+    predicted_expiry_date: Optional[datetime] = None
+    notes: Optional[str] = None
+    estimated_price: Optional[Decimal] = None
+    storage_location: Optional[str] = None
+
+class InventoryItem(InventoryItemBase):
+    id: str
+    user_id: str
+    status: str
+    days_until_expiry: Optional[int] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+
+class InventoryStats(BaseModel):
+    total_items: int
+    fresh_items: int
+    nearing_expiry: int
+    expired_items: int
+    categories_count: int
+    waste_prevented_this_month: dict
+
+class InventoryFilter(BaseModel):
+    status: Optional[str] = None
+    category: Optional[str] = None
+    search_query: Optional[str] = None
+    days_until_expiry_max: Optional[int] = None
+
+class ExpiryPredictionRequest(BaseModel):
+    product_name: str
+    category: str
+    brand: Optional[str] = None
+    purchase_date: datetime
+    storage_location: Optional[str] = "fridge"
+
+class ExpiryPredictionResponse(BaseModel):
+    predicted_expiry_date: datetime
+    confidence_score: float
+    days_until_expiry: int
+    storage_tips: List[str] = []
+
+# === Marketplace Schemas ===
+class MarketplaceListingBase(BaseModel):
+    title: str
+    description: str
+    category: str
+    price: Decimal
+    original_price: Optional[Decimal] = None
+    quantity: float = 1
+    unit: str = "pieces"
+    expiry_date: datetime
+    pickup_instructions: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+class MarketplaceListingCreate(MarketplaceListingBase):
+    inventory_item_id: Optional[str] = None
+
+class MarketplaceListingUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    price: Optional[Decimal] = None
+    pickup_instructions: Optional[str] = None
+    status: Optional[str] = None
+
+class MarketplaceListing(MarketplaceListingBase):
+    id: str
+    seller_id: str
+    seller_name: str
+    seller_rating: float = 0.0
+    status: str
+    views: int = 0
+    distance: Optional[float] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+
+class MarketplaceFilter(BaseModel):
+    category: Optional[str] = None
+    max_price: Optional[float] = None
+    max_distance_miles: Optional[float] = None
+    search_query: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+class SellerInfo(BaseModel):
+    id: str
+    username: str
+    full_name: Optional[str] = None
+    profile_image_url: Optional[str] = None
+    rating: Optional[float] = 0.0
+    total_sales: Optional[int] = 0
+    is_verified: Optional[bool] = False
+    distance_miles: Optional[float] = None
+    
+    class Config:
+        from_attributes = True
+
+class SellerInfo(BaseModel):
+    id: str
+    username: str
+    rating: float = 0.0
+    distance_miles: Optional[float] = None
+    
+    class Config:
+        from_attributes = True
+
+# === Payment Schemas ===
+class PaymentIntent(BaseModel):
+    client_secret: str
+    amount: int
+    currency: str
+    order_id: str
+
+class PaymentConfirmation(BaseModel):
+    payment_intent_id: str
+
+class PurchaseRequest(BaseModel):
+    listing_id: str
+
+class PurchaseResponse(BaseModel):
+    success: bool
+    message: str
+    order_id: str
+    contact_info: Optional[str] = None
+
+class OrderCreate(BaseModel):
+    listing_id: str
+    buyer_id: str
+    seller_id: str
+    item_name: str
+    price: Decimal
+    platform_fee: Decimal
+    total_amount: Decimal
+    stripe_payment_intent_id: str
+    status: str = "pending"
+
+class Order(BaseModel):
+    id: str
+    listing_id: str
+    buyer_id: str
+    seller_id: str
+    item_name: str
+    price: Decimal
+    platform_fee: Decimal
+    total_amount: Decimal
+    status: str
+    stripe_payment_intent_id: str
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+
+# === Receipt Schemas ===
+class ReceiptBase(BaseModel):
     store_name: Optional[str] = None
     receipt_date: Optional[datetime] = None
     total_amount: Optional[float] = None
@@ -83,206 +319,77 @@ class ReceiptBase(BaseSchema):
 class ReceiptCreate(ReceiptBase):
     pass
 
-class ReceiptInDB(ReceiptBase):
-    id: UUID
-    user_id: UUID
-    file_path: str
-    original_filename: Optional[str] = None
-    processed_at: datetime
-    ocr_text: Optional[str] = None
-    processing_status: str
-    created_at: datetime
-
-class Receipt(ReceiptInDB):
-    pass
-
-class ReceiptUploadResponse(BaseSchema):
-    receipt_id: UUID
-    message: str
-    processing_status: str
-
-# Inventory Item schemas
-class InventoryItemBase(BaseSchema):
-    name: str
-    category: Optional[str] = None
-    brand: Optional[str] = None
-    quantity: Optional[float] = None
-    unit: Optional[str] = None
-    purchase_price: Optional[float] = None
-    purchase_date: Optional[datetime] = None
-    store_name: Optional[str] = None
-    notes: Optional[str] = None
-
-class InventoryItemCreate(InventoryItemBase):
-    receipt_id: Optional[UUID] = None
-    predicted_expiry_date: Optional[datetime] = None
-    source: ItemSource = ItemSource.MANUAL
-
-class InventoryItemUpdate(BaseSchema):
-    name: Optional[str] = None
-    quantity: Optional[float] = None
-    unit: Optional[str] = None
-    status: Optional[ItemStatus] = None
-    actual_expiry_date: Optional[datetime] = None
-    notes: Optional[str] = None
-
-class InventoryItemInDB(InventoryItemBase):
-    id: UUID
-    user_id: UUID
-    receipt_id: Optional[UUID] = None
-    predicted_expiry_date: Optional[datetime] = None
-    actual_expiry_date: Optional[datetime] = None
-    confidence_score: Optional[float] = None
-    status: ItemStatus
-    source: ItemSource
-    created_at: datetime
-    last_updated: datetime
-    image_url: Optional[str] = None
-
-class InventoryItem(InventoryItemInDB):
-    days_until_expiry: Optional[int] = None
-
-class InventoryStats(BaseSchema):
-    total_items: int
-    fresh_items: int
-    nearing_expiry: int
-    expired_items: int
-    used_items: int
-    estimated_value: float
-    waste_prevented_kg: float
-
-# Marketplace schemas
-class MarketplaceListingBase(BaseSchema):
-    title: str
-    description: Optional[str] = None
-    category: Optional[str] = None
-    quantity: float
-    unit: str
-    price: float = Field(..., gt=0)
-    currency: str = "USD"
-    is_negotiable: bool = True
-    pickup_address: Optional[str] = None
-    delivery_available: bool = False
-    delivery_radius_miles: Optional[float] = None
-    expiry_date: Optional[datetime] = None
-    available_until: Optional[datetime] = None
-
-class MarketplaceListingCreate(MarketplaceListingBase):
-    inventory_item_id: Optional[UUID] = None
-    latitude: float
-    longitude: float
-
-class MarketplaceListingUpdate(BaseSchema):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    price: Optional[float] = Field(None, gt=0)
-    is_negotiable: Optional[bool] = None
-    status: Optional[ListingStatus] = None
-    available_until: Optional[datetime] = None
-
-class SellerInfo(BaseSchema):
-    id: UUID
-    username: str
-    rating: Optional[float] = None
-    distance_miles: Optional[float] = None
-
-class MarketplaceListingInDB(MarketplaceListingBase):
-    id: UUID
-    seller_id: UUID
-    inventory_item_id: Optional[UUID] = None
-    latitude: float
-    longitude: float
-    status: ListingStatus
-    views_count: int
-    created_at: datetime
-    updated_at: datetime
-
-class MarketplaceListing(MarketplaceListingInDB):
-    seller: SellerInfo
-    days_until_expiry: Optional[int] = None
-
-# Message schemas
-class MessageBase(BaseSchema):
-    content: str
-
-class MessageCreate(MessageBase):
-    receiver_id: UUID
-    listing_id: Optional[UUID] = None
-
-class MessageInDB(MessageBase):
-    id: UUID
-    sender_id: UUID
-    receiver_id: UUID
-    listing_id: Optional[UUID] = None
-    is_read: bool
-    created_at: datetime
-    read_at: Optional[datetime] = None
-
-class Message(MessageInDB):
-    sender_username: Optional[str] = None
-    receiver_username: Optional[str] = None
-
-# OCR and ML schemas
-class OCRResult(BaseSchema):
-    text: str
-    confidence: float
-    processing_time_ms: int
-
-class ParsedReceiptItem(BaseSchema):
-    name: str
-    quantity: Optional[str] = None
-    price: Optional[float] = None
-    category: Optional[str] = None
-    estimated_expiry_date: Optional[datetime] = None
-    confidence: float
-
-class ReceiptParsingResult(BaseSchema):
-    receipt_id: UUID
+class ReceiptUpdate(BaseModel):
     store_name: Optional[str] = None
     receipt_date: Optional[datetime] = None
     total_amount: Optional[float] = None
-    items: List[ParsedReceiptItem]
-    processing_time_ms: int
+    currency: Optional[str] = None
+
+class Receipt(ReceiptBase):
+    id: str
+    user_id: str
+    file_path: str
+    original_filename: Optional[str] = None
+    processing_status: str = "pending"
+    ocr_text: Optional[str] = None
+    processed_at: Optional[datetime] = None
+    created_at: datetime
     
-class ExpiryPredictionRequest(BaseSchema):
-    product_name: str
+    class Config:
+        from_attributes = True
+
+class ReceiptUploadResponse(BaseModel):
+    receipt_id: str
+    message: str
+    processing_status: str
+
+class ParsedReceiptItem(BaseModel):
+    name: str
     category: Optional[str] = None
     brand: Optional[str] = None
-    purchase_date: Optional[datetime] = None
-    storage_location: Optional[str] = "pantry"  # pantry, refrigerator, freezer
+    quantity: Optional[float] = None
+    unit: Optional[str] = None
+    price: Optional[float] = None
+    estimated_expiry_date: Optional[datetime] = None
 
-class ExpiryPredictionResponse(BaseSchema):
-    predicted_expiry_date: datetime
-    confidence_score: float
-    estimated_shelf_life_days: int
-    factors: List[str]  # Factors that influenced the prediction
+class ReceiptParsingResult(BaseModel):
+    receipt_id: str
+    items: List[ParsedReceiptItem]
+    total_items: int
+    processing_status: str
+    parsed_at: datetime
 
-# Search and filter schemas
-class InventoryFilter(BaseSchema):
-    status: Optional[ItemStatus] = None
-    category: Optional[str] = None
-    search_query: Optional[str] = None
-    days_until_expiry_max: Optional[int] = None
+# === OCR Schemas ===
+class OCRResult(BaseModel):
+    text: str
+    confidence: float  # 0-1 confidence score
+    processing_time_ms: int
+    regions: Optional[List[Dict[str, Any]]] = None
 
-class MarketplaceFilter(BaseSchema):
-    category: Optional[str] = None
-    max_price: Optional[float] = None
-    max_distance_miles: Optional[float] = None
-    search_query: Optional[str] = None
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
+class TextRegion(BaseModel):
+    text: str
+    confidence: float
+    bbox: Dict[str, int]  # x, y, width, height
 
-# Response schemas
-class APIResponse(BaseSchema):
-    success: bool
-    message: str
-    data: Optional[dict] = None
+class StoreInfo(BaseModel):
+    store_name: Optional[str] = None
+    receipt_date: Optional[str] = None
+    total_amount: Optional[float] = None
 
-class PaginatedResponse(BaseSchema):
-    items: List[dict]
-    total: int
-    page: int
-    per_page: int
-    pages: int
-    has_next: bool
-    has_prev: bool
+# === Message Schemas ===
+class MessageCreate(BaseModel):
+    receiver_id: str
+    listing_id: Optional[str] = None
+    content: str
+
+class Message(BaseModel):
+    id: str
+    sender_id: str
+    receiver_id: str
+    listing_id: Optional[str] = None
+    content: str
+    is_read: bool = False
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True

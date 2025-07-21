@@ -1,5 +1,16 @@
 import apiClient, { ApiResponse, setAuthTokens, clearAuthTokens } from './api';
 import { User, LoginRequest, RegisterRequest, Token } from './types';
+import * as AuthSession from 'expo-auth-session';
+import * as WebBrowser from 'expo-web-browser';
+import * as Crypto from 'expo-crypto';
+import { getGoogleClientId } from '../config/oauth';
+
+// Configure WebBrowser for better UX
+WebBrowser.maybeCompleteAuthSession();
+
+// Google OAuth configuration
+const GOOGLE_CLIENT_ID = getGoogleClientId();
+const redirectUri = AuthSession.makeRedirectUri({ useProxy: true });
 
 class AuthService {
   async login(credentials: LoginRequest): Promise<{ user: User; token: Token }> {
@@ -17,6 +28,77 @@ class AuthService {
       return { user, token };
     } catch (error: any) {
       throw new Error(error.response?.data?.message || 'Login failed');
+    }
+  }
+
+  async googleLogin(): Promise<{ user: User; token: Token }> {
+    try {
+      // For now, show demo mode since OAuth requires proper Google setup
+      const isDemoMode = GOOGLE_CLIENT_ID === 'demo-client-id';
+      
+      if (isDemoMode) {
+        // Demo Google login - simulate the OAuth flow
+        const demoUser = {
+          id: 'google-demo-user',
+          email: 'demo.google@shelflife.ai',
+          username: 'googledemo',
+          full_name: 'Demo Google User',
+          profile_image_url: 'https://via.placeholder.com/150?text=Google+Demo',
+          is_google_user: true,
+        };
+        
+        const demoToken = {
+          access_token: 'demo-google-access-token-' + Date.now(),
+          token_type: 'bearer',
+          expires_in: 3600,
+          refresh_token: 'demo-google-refresh-token-' + Date.now(),
+        };
+        
+        // Store demo tokens
+        await setAuthTokens(demoToken.access_token, demoToken.refresh_token);
+        
+        return { user: demoUser as User, token: demoToken as Token };
+      }
+      
+      // Real Google OAuth implementation (when proper credentials are configured)
+      const codeVerifier = await AuthSession.AuthRequest.makeCodeChallenge();
+      
+      const authRequest = new AuthSession.AuthRequest({
+        clientId: GOOGLE_CLIENT_ID,
+        scopes: ['openid', 'profile', 'email'],
+        responseType: AuthSession.ResponseType.Code,
+        redirectUri,
+        codeChallenge: codeVerifier.codeChallenge,
+        codeChallengeMethod: AuthSession.CodeChallengeMethod.S256,
+        additionalParameters: {
+          access_type: 'offline',
+          prompt: 'consent',
+        },
+      });
+
+      const authResult = await authRequest.promptAsync({
+        authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+      });
+
+      if (authResult.type === 'success' && authResult.params.code) {
+        const response = await apiClient.post<ApiResponse<{ user: User; token: Token }>>(
+          '/oauth/google/callback',
+          {
+            auth_code: authResult.params.code,
+            redirect_uri: redirectUri,
+            code_verifier: codeVerifier.codeVerifier,
+          }
+        );
+
+        const { user, token } = response.data.data!;
+        await setAuthTokens(token.access_token, token.refresh_token);
+        return { user, token };
+      } else {
+        throw new Error('Google authentication was cancelled or failed');
+      }
+    } catch (error: any) {
+      console.error('Google login error:', error);
+      throw new Error(error.message || 'Google login failed');
     }
   }
 

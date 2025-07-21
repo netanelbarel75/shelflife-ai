@@ -1,11 +1,45 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, Enum
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, ForeignKey, Enum, TypeDecorator
 from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects import postgresql
 import uuid
 from datetime import datetime
 import enum
 
 from app.database import Base
+
+
+class UUID(TypeDecorator):
+    """Platform-independent UUID type.
+    Uses PostgreSQL's UUID type, otherwise uses String(36).
+    """
+    impl = String
+    cache_ok = True
+    
+    def __init__(self, as_uuid=True, *args, **kwargs):
+        self.as_uuid = as_uuid
+        super().__init__(length=36 if as_uuid else None, *args, **kwargs)
+    
+    def load_dialect_impl(self, dialect):
+        if dialect.name == 'postgresql':
+            return dialect.type_descriptor(postgresql.UUID(as_uuid=self.as_uuid))
+        else:
+            return dialect.type_descriptor(String(36))
+    
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        elif dialect.name == 'postgresql':
+            return str(value) if not self.as_uuid else value
+        else:
+            return str(value)
+    
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        elif self.as_uuid:
+            return uuid.UUID(value) if isinstance(value, str) else value
+        else:
+            return str(value)
 
 class ItemStatus(str, enum.Enum):
     FRESH = "fresh"
@@ -198,3 +232,39 @@ class ShelfLifeData(Base):
     source = Column(String)  # Data source (USDA, manufacturer, etc.)
     last_updated = Column(DateTime, default=datetime.utcnow)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class OrderStatus(str, enum.Enum):
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    REFUNDED = "refunded"
+
+class Order(Base):
+    """Order model for marketplace transactions."""
+    __tablename__ = "orders"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    listing_id = Column(UUID(as_uuid=True), ForeignKey("marketplace_listings.id"), nullable=False)
+    buyer_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    seller_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    
+    # Order details
+    item_name = Column(String, nullable=False)
+    price = Column(Float, nullable=False)
+    platform_fee = Column(Float, nullable=False)
+    total_amount = Column(Float, nullable=False)
+    
+    # Payment
+    stripe_payment_intent_id = Column(String, nullable=False)
+    status = Column(Enum(OrderStatus), default=OrderStatus.PENDING)
+    
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    completed_at = Column(DateTime)
+    
+    # Relationships
+    listing = relationship("MarketplaceListing")
+    buyer = relationship("User", foreign_keys=[buyer_id])
+    seller = relationship("User", foreign_keys=[seller_id])

@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
-from typing import List
+from typing import List, Union
+from pydantic import field_validator
 import os
 
 class Settings(BaseSettings):
@@ -7,25 +8,19 @@ class Settings(BaseSettings):
     
     # App Settings
     APP_NAME: str = "ShelfLife.AI"
-    DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "your-super-secret-key-change-in-production")
+    DEBUG: bool = True
+    SECRET_KEY: str = "your-super-secret-key-change-in-production"
+    PORT: int = 8000
+    DEMO_MODE: bool = False
     
     # Database Settings
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL", 
-        "postgresql://shelflife_user:shelflife_pass@localhost:5432/shelflife_db"
-    )
+    DATABASE_URL: str = "postgresql://shelflife_user:shelflife_pass@localhost:5432/shelflife_db"
     
     # Redis Settings
-    REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    REDIS_URL: str = "redis://localhost:6379/0"
     
-    # CORS Settings
-    ALLOWED_ORIGINS: List[str] = [
-        "http://localhost:3000",
-        "http://localhost:8081",  # Expo dev server
-        "exp://localhost:19000",  # Expo client
-        "https://shelflife-ai.vercel.app",  # Production frontend (example)
-    ]
+    # CORS Settings - comma-separated string that will be parsed into a list
+    ALLOWED_ORIGINS: str = "http://localhost:3000,http://localhost:8081,exp://localhost:19000,http://localhost:19006"
     
     # JWT Settings
     JWT_ALGORITHM: str = "HS256"
@@ -35,32 +30,63 @@ class Settings(BaseSettings):
     # File Upload Settings
     MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
     UPLOAD_DIR: str = "uploads"
-    ALLOWED_EXTENSIONS: List[str] = [".jpg", ".jpeg", ".png", ".pdf"]
+    ALLOWED_EXTENSIONS: str = ".jpg,.jpeg,.png,.pdf"
     
     # External Services
-    AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID", "")
-    AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY", "")
-    AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")
-    S3_BUCKET: str = os.getenv("S3_BUCKET", "shelflife-receipts")
+    AWS_ACCESS_KEY_ID: str = ""
+    AWS_SECRET_ACCESS_KEY: str = ""
+    AWS_REGION: str = "us-east-1"
+    S3_BUCKET: str = "shelflife-receipts"
     
     # Tesseract OCR
-    TESSERACT_PATH: str = os.getenv("TESSERACT_PATH", "/usr/bin/tesseract")
+    TESSERACT_PATH: str = "/usr/bin/tesseract"
     
     # ML Model Settings
-    MODEL_PATH: str = os.getenv("MODEL_PATH", "ml-model/models/expiry_model.pkl")
+    MODEL_PATH: str = "ml-model/models/expiry_model.pkl"
     
     # Notification Settings
-    TWILIO_ACCOUNT_SID: str = os.getenv("TWILIO_ACCOUNT_SID", "")
-    TWILIO_AUTH_TOKEN: str = os.getenv("TWILIO_AUTH_TOKEN", "")
-    TWILIO_PHONE_NUMBER: str = os.getenv("TWILIO_PHONE_NUMBER", "")
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_PHONE_NUMBER: str = ""
     
-    # Payment Settings
-    STRIPE_SECRET_KEY: str = os.getenv("STRIPE_SECRET_KEY", "")
-    STRIPE_WEBHOOK_SECRET: str = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+    # Google OAuth Settings
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/oauth/google/callback"
+    
+    # Stripe Payment Settings
+    STRIPE_PUBLISHABLE_KEY: str = ""
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
     
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"  # Ignore extra fields from .env
+    
+    @field_validator('ALLOWED_ORIGINS', mode='before')
+    @classmethod
+    def validate_allowed_origins(cls, v):
+        """Ensure ALLOWED_ORIGINS is always a string."""
+        if isinstance(v, list):
+            return ','.join(v)
+        return v
+    
+    @field_validator('ALLOWED_EXTENSIONS', mode='before') 
+    @classmethod
+    def validate_allowed_extensions(cls, v):
+        """Ensure ALLOWED_EXTENSIONS is always a string."""
+        if isinstance(v, list):
+            return ','.join(v)
+        return v
+    
+    def get_allowed_origins(self) -> List[str]:
+        """Parse ALLOWED_ORIGINS as comma-separated string."""
+        return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
+    
+    def get_allowed_extensions(self) -> List[str]:
+        """Parse ALLOWED_EXTENSIONS as comma-separated string."""
+        return [ext.strip() for ext in self.ALLOWED_EXTENSIONS.split(",") if ext.strip()]
 
 settings = Settings()
 

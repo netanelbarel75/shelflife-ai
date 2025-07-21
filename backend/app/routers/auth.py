@@ -5,6 +5,7 @@ from datetime import timedelta
 from typing import Any
 
 from app.database import get_db
+from app.models import User as UserModel
 from app.schemas import (
     UserCreate, User, LoginRequest, Token, APIResponse,
     UserUpdate, UserInDB
@@ -19,8 +20,8 @@ security = HTTPBearer()
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
-) -> User:
-    """Dependency to get current authenticated user."""
+) -> UserModel:
+    """Dependency to get current authenticated user (returns ORM model)."""
     auth_service = AuthService(db)
     return auth_service.get_current_user(credentials.credentials)
 
@@ -82,11 +83,15 @@ async def login(
     access_token = auth_service.create_access_token(str(user.id))
     refresh_token = auth_service.create_refresh_token(str(user.id))
     
+    # Create user schema with computed full_name
+    user_schema = User.from_orm_with_full_name(user)
+    
     return Token(
         access_token=access_token,
         token_type="bearer",
         expires_in=30 * 60,  # 30 minutes
-        refresh_token=refresh_token
+        refresh_token=refresh_token,
+        user=user_schema
     )
 
 @router.post("/refresh", response_model=Token)
@@ -123,26 +128,27 @@ async def refresh_token(
 
 @router.get("/me", response_model=User)
 async def get_current_user_profile(
-    current_user: User = Depends(get_current_user)
+    current_user: UserModel = Depends(get_current_user)
 ) -> Any:
     """Get current user profile."""
-    return current_user
+    # Convert ORM model to schema with computed full_name
+    return User.from_orm_with_full_name(current_user)
 
 @router.put("/me", response_model=User)
 async def update_profile(
     user_update: UserUpdate,
-    current_user: User = Depends(get_current_user),
+    current_user: UserModel = Depends(get_current_user),
     db: Session = Depends(get_db)
 ) -> Any:
     """Update current user profile."""
     user_service = UserService(db)
     updated_user = user_service.update_user(current_user.id, user_update)
-    return updated_user
+    return User.from_orm_with_full_name(updated_user)
 
 @router.post("/logout", response_model=APIResponse)
 async def logout(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    current_user: User = Depends(get_current_user),
+    current_user: UserModel = Depends(get_current_user),
     db: Session = Depends(get_db)
 ) -> Any:
     """User logout (blacklist token)."""
@@ -158,7 +164,7 @@ async def logout(
 
 @router.delete("/account", response_model=APIResponse)
 async def delete_account(
-    current_user: User = Depends(get_current_user),
+    current_user: UserModel = Depends(get_current_user),
     db: Session = Depends(get_db)
 ) -> Any:
     """Delete user account."""

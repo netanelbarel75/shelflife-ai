@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 
 from app.config import settings
 from app.database import engine, create_tables
-from app.routers import auth, receipts, inventory, marketplace, users
+from app.routers import auth, receipts, inventory, marketplace, users, oauth, payments
 from app.models import Base
 
 security = HTTPBearer()
@@ -35,7 +35,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origins=settings.get_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -64,16 +64,18 @@ async def root():
 
 # Include routers
 app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
+app.include_router(oauth.router, prefix="/api/oauth", tags=["oauth"])
 app.include_router(receipts.router, prefix="/api/receipts", tags=["receipts"])
 app.include_router(inventory.router, prefix="/api/inventory", tags=["inventory"])
 app.include_router(marketplace.router, prefix="/api/marketplace", tags=["marketplace"])
+app.include_router(payments.router, prefix="/api/payments", tags=["payments"])
 app.include_router(users.router, prefix="/api/users", tags=["users"])
 
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=int(os.getenv("PORT", 8000)),
+        port=settings.PORT,
         reload=settings.DEBUG,
         log_level="info"
     )
