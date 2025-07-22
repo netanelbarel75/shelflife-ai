@@ -64,7 +64,7 @@ class User(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email = Column(String, unique=True, index=True, nullable=False)
     username = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
+    hashed_password = Column(String, nullable=True)  # Nullable for OAuth users
     first_name = Column(String)
     last_name = Column(String)
     phone = Column(String)
@@ -79,6 +79,11 @@ class User(Base):
     city = Column(String)
     state = Column(String)
     country = Column(String)
+    
+    # OAuth fields
+    google_id = Column(String, unique=True, nullable=True)
+    is_google_user = Column(Boolean, default=False)
+    profile_image_url = Column(String, nullable=True)
     
     # Relationships
     inventory_items = relationship("InventoryItem", back_populates="user")

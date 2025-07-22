@@ -54,6 +54,33 @@ class UserService:
         self.db.refresh(db_user)
         return db_user
 
+    def create_google_user(self, user_data: UserCreate, google_id: str) -> User:
+        """Create a new user from Google OAuth."""
+        db_user = User(
+            id=uuid.uuid4(),
+            email=user_data.email,
+            username=user_data.username,
+            hashed_password=None,  # No password for Google users
+            first_name=user_data.first_name,
+            last_name=user_data.last_name,
+            phone=getattr(user_data, 'phone', None),
+            is_verified=True,  # Google users are pre-verified
+            created_at=datetime.utcnow()
+        )
+        
+        # Store Google-specific info if your User model supports it
+        if hasattr(db_user, 'google_id'):
+            db_user.google_id = google_id
+        if hasattr(db_user, 'is_google_user'):
+            db_user.is_google_user = True
+        if hasattr(db_user, 'profile_image_url') and user_data.profile_image_url:
+            db_user.profile_image_url = user_data.profile_image_url
+            
+        self.db.add(db_user)
+        self.db.commit()
+        self.db.refresh(db_user)
+        return db_user
+
     def update_user(self, user_id: str, user_update: UserUpdate) -> Optional[User]:
         """Update user information."""
         user = self.db.query(User).filter(User.id == user_id).first()
