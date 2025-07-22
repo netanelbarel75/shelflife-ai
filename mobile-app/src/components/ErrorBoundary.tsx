@@ -34,9 +34,10 @@ export class ErrorBoundary extends Component<Props, State> {
 
       return (
         <View style={styles.container}>
+          <Text style={styles.emoji}>🌱</Text>
           <Text style={styles.title}>Oops! Something went wrong</Text>
           <Text style={styles.message}>
-            {this.state.error?.message || 'An unexpected error occurred'}
+            {this.state.error?.message || 'An unexpected error occurred. Please try again.'}
           </Text>
           <TouchableOpacity
             style={styles.button}
@@ -44,6 +45,9 @@ export class ErrorBoundary extends Component<Props, State> {
           >
             <Text style={styles.buttonText}>Try Again</Text>
           </TouchableOpacity>
+          <Text style={styles.helpText}>
+            If this problem persists, please contact support.
+          </Text>
         </View>
       );
     }
@@ -60,6 +64,10 @@ const styles = StyleSheet.create({
     padding: 20,
     backgroundColor: '#f8f9fa',
   },
+  emoji: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
@@ -75,14 +83,21 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   button: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#4CAF50',
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 8,
+    marginBottom: 16,
   },
   buttonText: {
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
+  },
+  helpText: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
 });

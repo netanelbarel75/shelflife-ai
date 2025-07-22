@@ -3,15 +3,21 @@
 """
 Create demo data for ShelfLife.AI backend testing.
 This script creates demo users, inventory items, and marketplace listings.
+
+Fixed version that ensures proper authentication setup.
 """
 
 import sys
 import os
 from datetime import datetime, timedelta
 import uuid
+from passlib.context import CryptContext
 
 # Add the current directory to Python path
 sys.path.insert(0, os.getcwd())
+
+# Password hashing context
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def create_demo_data():
     """Create demo users and data for testing."""
@@ -21,12 +27,27 @@ def create_demo_data():
         from app.config import settings
         from app.database import SessionLocal
         from app.models import User, InventoryItem, MarketplaceListing, ItemStatus, ItemSource, ListingStatus
-        from app.services.auth_service import AuthService
         
         db = SessionLocal()
-        auth_service = AuthService(db)
         
-        # Demo users
+        # Clear existing demo data if it exists
+        print("🧹 Cleaning up existing demo data...")
+        demo_emails = ["demo@shelflife.ai", "alice@example.com", "bob@example.com"]
+        
+        for email in demo_emails:
+            existing_user = db.query(User).filter(User.email == email).first()
+            if existing_user:
+                print(f"   🗑️  Removing existing user: {email}")
+                # Delete related inventory items
+                db.query(InventoryItem).filter(InventoryItem.user_id == existing_user.id).delete()
+                # Delete related marketplace listings
+                db.query(MarketplaceListing).filter(MarketplaceListing.seller_id == existing_user.id).delete()
+                # Delete user
+                db.delete(existing_user)
+        
+        db.commit()
+        
+        # Demo users with properly hashed passwords
         demo_users = [
             {
                 "email": "demo@shelflife.ai",
@@ -73,19 +94,15 @@ def create_demo_data():
         
         print("👥 Creating demo users...")
         for user_data in demo_users:
-            # Check if user already exists
-            existing_user = db.query(User).filter(User.email == user_data["email"]).first()
-            if existing_user:
-                print(f"   ⏭️ User {user_data['email']} already exists, skipping...")
-                created_users.append(existing_user)
-                continue
+            # Hash password properly
+            hashed_password = pwd_context.hash(user_data["password"])
             
-            # Create user
+            # Create user with explicit UUID
             user = User(
                 id=uuid.uuid4(),
                 email=user_data["email"],
                 username=user_data["username"],
-                hashed_password=auth_service.get_password_hash(user_data["password"]),
+                hashed_password=hashed_password,
                 first_name=user_data["first_name"],
                 last_name=user_data["last_name"],
                 phone=user_data["phone"],
@@ -102,9 +119,15 @@ def create_demo_data():
             
             db.add(user)
             created_users.append(user)
-            print(f"   ✅ Created user: {user_data['email']}")
+            print(f"   ✅ Created user: {user_data['email']} (Password: {user_data['password']})")
         
+        # Commit users first
         db.commit()
+        
+        # Refresh users to get their IDs
+        for user in created_users:
+            db.refresh(user)
+        
         print(f"✅ Created {len(created_users)} users")
         
         # Create demo inventory items
@@ -159,6 +182,16 @@ def create_demo_data():
                 "purchase_price": 4.99,
                 "days_until_expiry": 7,
                 "status": ItemStatus.FRESH
+            },
+            {
+                "name": "Chicken Breast",
+                "category": "Meat",
+                "brand": "Fresh Market",
+                "quantity": 2,
+                "unit": "lbs",
+                "purchase_price": 8.99,
+                "days_until_expiry": 2,
+                "status": ItemStatus.NEARING
             }
         ]
         
@@ -274,20 +307,34 @@ def create_demo_data():
         db.commit()
         print(f"✅ Created {len(created_listings)} marketplace listings")
         
+        # Test authentication for each demo user
+        print("\n🔐 Testing demo user authentication...")
+        from app.services.auth_service import AuthService
+        auth_service = AuthService(db)
+        
+        for user_data in demo_users:
+            user = auth_service.authenticate_user(user_data["email"], user_data["password"])
+            if user:
+                print(f"   ✅ Authentication test passed: {user_data['email']}")
+            else:
+                print(f"   ❌ Authentication test failed: {user_data['email']}")
+        
         print("\n🎉 Demo data created successfully!")
         print("=" * 60)
         print("📧 Demo Login Credentials:")
-        print("   Email: demo@shelflife.ai")
-        print("   Password: demo123")
         print("")
-        print("   Email: alice@example.com") 
-        print("   Password: alice123")
-        print("")
-        print("   Email: bob@example.com")
-        print("   Password: bob123")
+        for user_data in demo_users:
+            print(f"   Email: {user_data['email']}")
+            print(f"   Password: {user_data['password']}")
+            print(f"   Name: {user_data['first_name']} {user_data['last_name']}")
+            print("")
         print("=" * 60)
         print("🌐 Test the API at: http://localhost:8000/docs")
         print("🔗 Try the login endpoint with the demo credentials!")
+        print("🧪 Test authentication:")
+        print("   curl -X POST \"http://localhost:8000/api/auth/login\" \\")
+        print("        -H \"Content-Type: application/json\" \\")
+        print("        -d '{\"email\":\"demo@shelflife.ai\",\"password\":\"demo123\"}'")
         
         db.close()
         

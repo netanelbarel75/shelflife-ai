@@ -3,15 +3,21 @@ export interface User {
   id: string;
   email: string;
   username: string;
-  first_name?: string;
-  last_name?: string;
-  phone?: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  full_name?: string | null;
+  profile_image_url?: string | null;
+  phone?: string | null;
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   is_active: boolean;
   is_verified: boolean;
+  is_google_user?: boolean;
   created_at: string;
-  latitude?: number;
-  longitude?: number;
-  city?: string;
+  updated_at?: string | null;
 }
 
 export interface LoginRequest {
@@ -22,9 +28,10 @@ export interface LoginRequest {
 export interface RegisterRequest {
   email: string;
   username: string;
-  password: string;
+  password?: string; // Optional for Google users
   first_name?: string;
   last_name?: string;
+  full_name?: string;
   phone?: string;
 }
 
@@ -33,6 +40,7 @@ export interface Token {
   token_type: string;
   expires_in: number;
   refresh_token?: string;
+  user?: User;
 }
 
 // Inventory types

@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+// src/screens/HomeScreen.tsx - Updated with React Navigation and functional features
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,42 +8,55 @@ import {
   TouchableOpacity,
   RefreshControl,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
-import inventoryService from '../services/inventoryService';
-import { InventoryItem, InventoryStats, ItemStatus } from '../services/types';
-import { Loading } from '../components';
-
-
+import { inventoryService, InventoryItem, InventoryStats } from '../services/InventoryService';
+import { HomeScreenNavigationProp } from '../types/navigation';
 
 const HomeScreen: React.FC = () => {
-  const { user, isAuthenticated } = useAuth();
+  const navigation = useNavigation<HomeScreenNavigationProp>();
+  const { user, logout, isLoading: authLoading } = useAuth();
   const [upcomingExpirations, setUpcomingExpirations] = useState<InventoryItem[]>([]);
   const [stats, setStats] = useState<InventoryStats | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isAuthenticated) {
-      loadData();
-    }
-  }, [isAuthenticated]);
+  // Load dashboard data when screen focuses
+  useFocusEffect(
+    useCallback(() => {
+      loadDashboardData();
+    }, [])
+  );
 
-  const loadData = async () => {
+  // Remove loadUserData function since user data comes from AuthContext
+
+  const loadDashboardData = async () => {
     try {
-      setError(null);
-      const [expiringItems, inventoryStats] = await Promise.all([
-        inventoryService.getExpiringItems(7), // Get items expiring in next 7 days
-        inventoryService.getInventoryStats(),
-      ]);
+      setLoading(true);
       
-      setUpcomingExpirations(expiringItems);
+      // Get inventory stats
+      const inventoryStats = inventoryService.getInventoryStats();
       setStats(inventoryStats);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load data');
-      console.error('Error loading home screen data:', err);
+      
+      // Get expiry alerts
+      const expiryAlerts = inventoryService.getExpiryAlerts();
+      
+      // Convert alerts to inventory items for display
+      const inventory = inventoryService.getInventory();
+      const urgentItems = expiryAlerts
+        .filter(alert => alert.urgency === 'high' || alert.urgency === 'expired')
+        .map(alert => inventory.find(item => item.id === alert.itemId))
+        .filter((item): item is InventoryItem => item !== undefined)
+        .slice(0, 5); // Show top 5 urgent items
+      
+      setUpcomingExpirations(urgentItems);
+    } catch (error) {
+      console.error('Error loading dashboard data:', error);
+      Alert.alert('Error', 'Failed to load dashboard data');
     } finally {
       setLoading(false);
     }
@@ -50,83 +64,152 @@ const HomeScreen: React.FC = () => {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadData();
+    await loadDashboardData();
     setRefreshing(false);
   };
 
-  const getStatusColor = (status: ItemStatus) => {
-    switch (status) {
-      case ItemStatus.EXPIRED:
-        return '#FF6B6B';
-      case ItemStatus.NEARING:
-        return '#FFB347';
-      case ItemStatus.USED:
-        return '#6c757d';
-      default:
-        return '#51C878';
-    }
+  const getStatusColor = (item: InventoryItem) => {
+    const today = new Date();
+    const expiryDate = new Date(item.estimatedExpiryDate);
+    const daysUntilExpiry = Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+    if (item.status === 'used') return '#9E9E9E';
+    if (daysUntilExpiry < 0) return '#F44336'; // Expired - Red
+    if (daysUntilExpiry <= 2) return '#FF9800'; // Expiring soon - Orange
+    return '#4CAF50'; // Fresh - Green
   };
 
-  const getStatusIcon = (status: ItemStatus) => {
-    switch (status) {
-      case ItemStatus.EXPIRED:
-        return 'warning';
-      case ItemStatus.NEARING:
-        return 'time';
-      case ItemStatus.USED:
-        return 'checkmark-done';
-      default:
-        return 'checkmark-circle';
-    }
+  const getStatusIcon = (item: InventoryItem) => {
+    const today = new Date();
+    const expiryDate = new Date(item.estimatedExpiryDate);
+    const daysUntilExpiry = Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+    if (item.status === 'used') return 'checkmark-done';
+    if (daysUntilExpiry < 0) return 'warning';
+    if (daysUntilExpiry <= 2) return 'time';
+    return 'checkmark-circle';
   };
 
-  const handleItemPress = (item: InventoryItem) => {
-    const actions = ['Use Now', 'Share Locally', 'Mark as Used', 'Cancel'];
+  const getDaysText = (item: InventoryItem) => {
+    if (item.status === 'used') return 'Used';
     
-    Alert.alert(
-      `${item.name}`,
-      `${item.days_until_expiry !== undefined ? 
-        item.days_until_expiry === 0 ? 'Expires today!' : `Expires in ${item.days_until_expiry} day(s)` : 
-        'No expiry date set'}`,
-      actions.map((action, index) => ({
-        text: action,
-        style: index === actions.length - 1 ? 'cancel' : 'default',
+    const today = new Date();
+    const expiryDate = new Date(item.estimatedExpiryDate);
+    const daysUntilExpiry = Math.ceil((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+    if (daysUntilExpiry < 0) return 'Expired!';
+    if (daysUntilExpiry === 0) return 'Today!';
+    if (daysUntilExpiry === 1) return 'Tomorrow';
+    return `${daysUntilExpiry}d left`;
+  };
+
+  const handleItemPress = async (item: InventoryItem) => {
+    const actions = [];
+    
+    if (item.status !== 'used') {
+      actions.push({
+        text: '✅ Mark as Used',
         onPress: async () => {
-          if (action === 'Mark as Used') {
-            try {
-              await inventoryService.markAsUsed(item.id);
-              Alert.alert('Success', `${item.name} marked as used!`);
-              await loadData(); // Refresh data
-            } catch (err: any) {
-              Alert.alert('Error', err.message || 'Failed to mark item as used');
+          try {
+            const success = await inventoryService.markAsUsed(item.id, 'Marked as used from home screen');
+            if (success) {
+              Alert.alert('Success! 🎉', `"${item.name}" marked as used`);
+              await loadDashboardData(); // Refresh data
+            } else {
+              Alert.alert('Error', 'Failed to mark item as used');
             }
-          } else if (action !== 'Cancel') {
-            Alert.alert('Coming Soon', `${action} feature will be available soon!`);
+          } catch (error) {
+            console.error('Error marking item as used:', error);
+            Alert.alert('Error', 'Failed to mark item as used');
           }
         },
-      }))
+      });
+    }
+    
+    if (item.status !== 'expired' && !item.sharedInMarketplace) {
+      actions.push({
+        text: '🛒 Share in Marketplace',
+        onPress: async () => {
+          try {
+            const success = await inventoryService.shareInMarketplace(item.id);
+            if (success) {
+              Alert.alert('Success! 🎉', `"${item.name}" is now available in the local marketplace`);
+              await loadDashboardData();
+            } else {
+              Alert.alert('Error', 'Failed to share item in marketplace');
+            }
+          } catch (error) {
+            console.error('Error sharing to marketplace:', error);
+            Alert.alert('Error', 'Failed to share item in marketplace');
+          }
+        },
+      });
+    }
+    
+    actions.push(
+      {
+        text: '📋 View in Inventory',
+        onPress: () => navigation.navigate('Inventory'),
+      },
+      {
+        text: 'Cancel',
+        style: 'cancel' as const,
+      }
+    );
+
+    Alert.alert(
+      item.name,
+      `${item.quantity} ${item.unit || 'units'} • ${getDaysText(item)}${item.sharedInMarketplace ? '\n🛒 Shared in marketplace' : ''}`,
+      actions
     );
   };
 
-  if (!isAuthenticated) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.emptyText}>Please log in to view your food inventory</Text>
-      </View>
+  const handleQuickAction = (action: string) => {
+    switch (action) {
+      case 'add_receipt':
+        navigation.navigate('ReceiptUpload');
+        break;
+      case 'add_manual':
+        navigation.navigate('AddItemManually');
+        break;
+      case 'view_inventory':
+        navigation.navigate('Inventory');
+        break;
+      case 'marketplace':
+        navigation.navigate('Marketplace');
+        break;
+      default:
+        Alert.alert('Coming Soon', 'This feature will be available soon!');
+    }
+  };
+
+  const handleLogout = async () => {
+    Alert.alert(
+      'Logout',
+      'Are you sure you want to logout?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Logout',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await logout();
+            } catch (error) {
+              console.error('Logout error:', error);
+              Alert.alert('Error', 'Failed to logout. Please try again.');
+            }
+          },
+        },
+      ]
     );
-  }
+  };
 
-  if (loading) {
-    return <Loading message="Loading your food inventory..." />;
-  }
-
-  if (error) {
+  if (loading && !refreshing) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.errorText}>Error: {error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={loadData}>
-          <Text style={styles.retryButtonText}>Retry</Text>
-        </TouchableOpacity>
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#4CAF50" />
+        <Text style={styles.loadingText}>Loading your dashboard...</Text>
       </View>
     );
   }
@@ -138,37 +221,60 @@ const HomeScreen: React.FC = () => {
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
       }
     >
-      {/* Header Stats */}
+      {/* Header */}
+      <View style={styles.header}>
+        <View style={styles.userGreeting}>
+          <Text style={styles.greeting}>
+            🌱 Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}!
+          </Text>
+          <Text style={styles.userName}>
+            {user?.full_name || user?.username || 'Food Saver'}
+          </Text>
+        </View>
+        <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
+          <Ionicons name="log-out-outline" size={24} color="#666" />
+        </TouchableOpacity>
+      </View>
+
+      <Text style={styles.tagline}>Let's reduce food waste together</Text>
+
+      {/* Stats Container */}
       {stats && (
         <View style={styles.statsContainer}>
           <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{stats.total_items}</Text>
-            <Text style={styles.statLabel}>Total Items</Text>
+            <Text style={styles.statNumber}>{stats.totalItems}</Text>
+            <Text style={styles.statLabel}>Items Tracked</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={[styles.statNumber, { color: '#FF6B6B' }]}>
-              {stats.expired_items}
+            <Text style={[styles.statNumber, { color: '#FF9800' }]}>
+              {stats.nearingExpiry + stats.expiredItems}
             </Text>
-            <Text style={styles.statLabel}>Expired Items</Text>
+            <Text style={styles.statLabel}>Need Attention</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={[styles.statNumber, { color: '#51C878' }]}>
-              {stats.waste_prevented_kg}kg
+            <Text style={[styles.statNumber, { color: '#4CAF50' }]}>
+              {stats.wastePreventedThisMonth.itemCount}
             </Text>
-            <Text style={styles.statLabel}>Waste Saved</Text>
+            <Text style={styles.statLabel}>Items Saved</Text>
           </View>
         </View>
       )}
 
-      {/* Today's Priority Items */}
+      {/* Priority Items */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>🚨 Priority Items</Text>
         {upcomingExpirations.length === 0 ? (
           <View style={styles.emptyState}>
-            <Ionicons name="checkmark-circle" size={48} color="#51C878" />
+            <Ionicons name="checkmark-circle" size={48} color="#4CAF50" />
             <Text style={styles.emptyText}>
-              Great job! No items expiring soon.
+              Great job! No items need immediate attention.
             </Text>
+            <TouchableOpacity
+              style={styles.addItemsButton}
+              onPress={() => handleQuickAction('add_manual')}
+            >
+              <Text style={styles.addItemsButtonText}>Add items to get started</Text>
+            </TouchableOpacity>
           </View>
         ) : (
           upcomingExpirations.map((item) => (
@@ -176,30 +282,31 @@ const HomeScreen: React.FC = () => {
               key={item.id}
               style={[
                 styles.itemCard,
-                { borderLeftColor: getStatusColor(item.status) },
+                { borderLeftColor: getStatusColor(item) },
               ]}
               onPress={() => handleItemPress(item)}
             >
               <View style={styles.itemHeader}>
                 <Ionicons
-                  name={getStatusIcon(item.status)}
+                  name={getStatusIcon(item)}
                   size={24}
-                  color={getStatusColor(item.status)}
+                  color={getStatusColor(item)}
                 />
                 <View style={styles.itemInfo}>
                   <Text style={styles.itemName}>{item.name}</Text>
-                  <Text style={styles.itemCategory}>{item.category}</Text>
+                  <Text style={styles.itemCategory}>
+                    {item.category.charAt(0).toUpperCase() + item.category.slice(1)} • {item.quantity} {item.unit || 'units'}
+                  </Text>
+                  {item.sharedInMarketplace && (
+                    <Text style={styles.marketplaceTag}>🛒 In marketplace</Text>
+                  )}
                 </View>
                 <View style={styles.expiryInfo}>
-                  <Text style={[styles.daysLeft, { color: getStatusColor(item.status) }]}>
-                    {item.days_until_expiry !== undefined ? 
-                      item.days_until_expiry === 0 ? 'Today!' : `${item.days_until_expiry}d left` : 
-                      'No date'}
+                  <Text style={[styles.daysLeft, { color: getStatusColor(item) }]}>
+                    {getDaysText(item)}
                   </Text>
                   <Text style={styles.expiryDate}>
-                    {item.predicted_expiry_date ? 
-                      new Date(item.predicted_expiry_date).toLocaleDateString() : 
-                      'No expiry date'}
+                    {new Date(item.estimatedExpiryDate).toLocaleDateString()}
                   </Text>
                 </View>
               </View>
@@ -208,21 +315,61 @@ const HomeScreen: React.FC = () => {
         )}
       </View>
 
+      {/* Add Items Section */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>📦 Add Items to Inventory</Text>
+        
+        <TouchableOpacity 
+          style={styles.addReceiptButton} 
+          onPress={() => handleQuickAction('add_receipt')}
+        >
+          <Text style={styles.addReceiptIcon}>📄</Text>
+          <View style={styles.addButtonContent}>
+            <Text style={styles.addReceiptText}>Scan Receipt</Text>
+            <Text style={styles.addReceiptSubtext}>Auto-detect items from receipt photo</Text>
+          </View>
+          <Text style={styles.addReceiptArrow}>→</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={styles.addManualButton} 
+          onPress={() => handleQuickAction('add_manual')}
+        >
+          <Text style={styles.addManualIcon}>✋</Text>
+          <View style={styles.addButtonContent}>
+            <Text style={styles.addManualText}>Add Manually</Text>
+            <Text style={styles.addManualSubtext}>Add items one by one with smart predictions</Text>
+          </View>
+          <Text style={styles.addManualArrow}>→</Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Quick Actions */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>⚡ Quick Actions</Text>
         <View style={styles.actionButtons}>
-          <TouchableOpacity style={styles.actionButton}>
-            <Ionicons name="camera" size={24} color="#2E8B57" />
-            <Text style={styles.actionText}>Add Receipt</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton}>
-            <Ionicons name="list" size={24} color="#2E8B57" />
+          <TouchableOpacity 
+            style={styles.actionButton}
+            onPress={() => handleQuickAction('view_inventory')}
+          >
+            <Ionicons name="cube-outline" size={24} color="#4CAF50" />
             <Text style={styles.actionText}>View Inventory</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton}>
-            <Ionicons name="storefront" size={24} color="#2E8B57" />
-            <Text style={styles.actionText}>Local Market</Text>
+          
+          <TouchableOpacity 
+            style={styles.actionButton}
+            onPress={() => handleQuickAction('marketplace')}
+          >
+            <Ionicons name="storefront-outline" size={24} color="#4CAF50" />
+            <Text style={styles.actionText}>Browse Market</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.actionButton}
+            onPress={() => navigation.navigate('Profile')}
+          >
+            <Ionicons name="person-outline" size={24} color="#4CAF50" />
+            <Text style={styles.actionText}>Your Profile</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -235,17 +382,61 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8f9fa',
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#666',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 8,
+  },
+  userGreeting: {
+    flex: 1,
+  },
+  greeting: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  userName: {
+    fontSize: 16,
+    color: '#4CAF50',
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  logoutButton: {
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: '#f0f0f0',
+  },
+  tagline: {
+    fontSize: 16,
+    color: '#666',
+    paddingHorizontal: 20,
+    marginBottom: 24,
+  },
   statsContainer: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingHorizontal: 20,
+    marginBottom: 24,
     gap: 12,
   },
   statCard: {
     flex: 1,
     backgroundColor: 'white',
-    padding: 16,
-    borderRadius: 12,
+    borderRadius: 16,
+    padding: 20,
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -254,36 +445,55 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   statNumber: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: 'bold',
-    color: '#2E8B57',
+    color: '#4CAF50',
+    marginBottom: 8,
   },
   statLabel: {
     fontSize: 12,
     color: '#666',
-    marginTop: 4,
     textAlign: 'center',
+    fontWeight: '500',
   },
   section: {
-    padding: 16,
+    paddingHorizontal: 20,
+    marginBottom: 24,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
-    marginBottom: 12,
+    marginBottom: 16,
     color: '#333',
   },
   emptyState: {
     alignItems: 'center',
     padding: 32,
     backgroundColor: 'white',
-    borderRadius: 12,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   emptyText: {
     fontSize: 16,
     color: '#666',
-    marginTop: 8,
+    marginTop: 12,
     textAlign: 'center',
+    marginBottom: 16,
+  },
+  addItemsButton: {
+    backgroundColor: '#4CAF50',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  addItemsButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   itemCard: {
     backgroundColor: 'white',
@@ -315,6 +525,12 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 2,
   },
+  marketplaceTag: {
+    fontSize: 10,
+    color: '#4CAF50',
+    marginTop: 2,
+    fontWeight: 'bold',
+  },
   expiryInfo: {
     alignItems: 'flex-end',
   },
@@ -323,9 +539,70 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   expiryDate: {
-    fontSize: 12,
+    fontSize: 10,
     color: '#666',
     marginTop: 2,
+  },
+  addReceiptButton: {
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  addManualButton: {
+    backgroundColor: '#fff3e0',
+    borderRadius: 16,
+    padding: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#FFB347',
+  },
+  addReceiptIcon: {
+    fontSize: 32,
+    marginRight: 16,
+  },
+  addManualIcon: {
+    fontSize: 32,
+    marginRight: 16,
+  },
+  addButtonContent: {
+    flex: 1,
+  },
+  addReceiptText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  addManualText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  addReceiptSubtext: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 4,
+  },
+  addManualSubtext: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 4,
+  },
+  addReceiptArrow: {
+    fontSize: 24,
+    color: '#4CAF50',
+  },
+  addManualArrow: {
+    fontSize: 24,
+    color: '#FF9800',
   },
   actionButtons: {
     flexDirection: 'row',
@@ -345,29 +622,10 @@ const styles = StyleSheet.create({
   },
   actionText: {
     fontSize: 12,
-    color: '#2E8B57',
-    marginTop: 4,
+    color: '#4CAF50',
+    marginTop: 8,
     textAlign: 'center',
     fontWeight: '500',
-  },
-  errorText: {
-    fontSize: 16,
-    color: '#dc3545',
-    textAlign: 'center',
-    margin: 20,
-  },
-  retryButton: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignSelf: 'center',
-    marginTop: 10,
-  },
-  retryButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
   },
 });
 

@@ -78,7 +78,7 @@ const WebMapComponent: React.FC<WebMapProps> = ({
 
     } catch (error) {
       console.warn('❌ Failed to initialize leaflet:', error);
-      setError(error.message);
+      setError(error instanceof Error ? error.message : 'Unknown error occurred');
       setIsMapReady(false);
     }
   };
@@ -112,7 +112,7 @@ const WebMapComponent: React.FC<WebMapProps> = ({
 
     } catch (error) {
       console.error('❌ Failed to create map:', error);
-      setError(error.message);
+      setError(error instanceof Error ? error.message : 'Unknown error occurred');
       setIsMapReady(false);
     }
   };

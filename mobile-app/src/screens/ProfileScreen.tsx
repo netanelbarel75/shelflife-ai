@@ -9,6 +9,7 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '../contexts/AuthContext';
 
 interface UserStats {
   totalItems: number;
@@ -19,6 +20,8 @@ interface UserStats {
 }
 
 const ProfileScreen: React.FC = () => {
+  const { user, logout } = useAuth();
+  
   const [notifications, setNotifications] = useState({
     expiry: true,
     marketplace: true,
@@ -44,9 +47,13 @@ const ProfileScreen: React.FC = () => {
       'Are you sure you want to logout?',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Logout', style: 'destructive', onPress: () => {
-          // TODO: Implement logout
-          Alert.alert('Logged out', 'You have been logged out successfully.');
+        { text: 'Logout', style: 'destructive', onPress: async () => {
+          try {
+            await logout();
+            Alert.alert('Logged out', 'You have been logged out successfully.');
+          } catch (error: any) {
+            Alert.alert('Logout Error', error.message || 'Failed to logout');
+          }
         }},
       ]
     );
@@ -114,8 +121,8 @@ const ProfileScreen: React.FC = () => {
         <View style={styles.avatarContainer}>
           <Ionicons name="person" size={48} color="#2E8B57" />
         </View>
-        <Text style={styles.userName}>John Doe</Text>
-        <Text style={styles.userEmail}>john.doe@email.com</Text>
+        <Text style={styles.userName}>{user?.full_name || user?.username || 'User'}</Text>
+        <Text style={styles.userEmail}>{user?.email || 'user@email.com'}</Text>
         <TouchableOpacity style={styles.editProfileButton}>
           <Text style={styles.editProfileText}>Edit Profile</Text>
         </TouchableOpacity>

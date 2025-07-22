@@ -13,6 +13,8 @@ interface MarkerData {
   expiryStatus?: 'fresh' | 'near-expiry' | 'expired';
 }
 
+export { MarkerData };
+
 interface CrossPlatformMapProps {
   markers: MarkerData[];
   initialLatitude?: number;

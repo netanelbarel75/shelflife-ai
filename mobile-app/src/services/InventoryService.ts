@@ -108,127 +108,110 @@ class InventoryService {
     }
   }
 
-  async addReceiptItems(receipt: ProcessedReceipt): Promise<InventoryItem[]> {
-    const addedItems: InventoryItem[] = [];
-
-    for (const receiptItem of receipt.items) {
-      const inventoryItem: InventoryItem = {
-        ...receiptItem,
+  // Add a single item to inventory
+  async addItem(itemData: {
+    name: string;
+    originalName?: string;
+    category: FoodCategory;
+    quantity?: number;
+    unit?: string;
+    location?: InventoryItem['location'];
+    estimatedExpiryDate: string;
+    price?: number;
+    notes?: string;
+  }): Promise<boolean> {
+    try {
+      const newItem: InventoryItem = {
+        id: `item_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         userId: this.userId,
-        status: this.calculateStatus(receiptItem.estimatedExpiryDate),
+        name: itemData.name,
+        originalName: itemData.originalName || itemData.name,
+        category: itemData.category,
+        quantity: itemData.quantity || 1,
+        unit: itemData.unit || 'pieces',
+        price: itemData.price || 0,
+        estimatedExpiryDate: itemData.estimatedExpiryDate,
+        status: this.calculateStatus(itemData.estimatedExpiryDate),
         addedDate: new Date().toISOString(),
         lastUpdated: new Date().toISOString(),
-        location: this.suggestLocation(receiptItem.category),
+        location: itemData.location || this.suggestLocation(itemData.category),
+        photos: [],
+        notes: itemData.notes || '',
         sharedInMarketplace: false,
         notificationIds: [],
       };
 
-      this.inventory.set(inventoryItem.id, inventoryItem);
-      addedItems.push(inventoryItem);
+      this.inventory.set(newItem.id, newItem);
+      await this.saveInventoryToStorage();
+      await this.scheduleExpiryNotifications(newItem);
 
-      // Schedule expiry notifications
-      await this.scheduleExpiryNotifications(inventoryItem);
+      console.log(`✅ Added item: ${newItem.name} (expires: ${newItem.estimatedExpiryDate})`);
+      return true;
+    } catch (error) {
+      console.error('Error adding item:', error);
+      return false;
     }
-
-    await this.saveInventoryToStorage();
-    return addedItems;
   }
 
-  async updateItem(itemId: string, updates: Partial<InventoryItem>): Promise<InventoryItem | null> {
-    const item = this.inventory.get(itemId);
-    if (!item) return null;
+  async updateItem(itemId: string, updates: Partial<InventoryItem>): Promise<boolean> {
+    try {
+      const item = this.inventory.get(itemId);
+      if (!item) return false;
 
-    const updatedItem: InventoryItem = {
-      ...item,
-      ...updates,
-      lastUpdated: new Date().toISOString(),
-    };
+      const updatedItem = { ...item, ...updates, lastUpdated: new Date().toISOString() };
+      this.inventory.set(itemId, updatedItem);
+      await this.saveInventoryToStorage();
 
-    // Update status based on new expiry date if changed
-    if (updates.estimatedExpiryDate) {
-      updatedItem.status = this.calculateStatus(updates.estimatedExpiryDate);
+      return true;
+    } catch (error) {
+      console.error('Error updating item:', error);
+      return false;
     }
-
-    this.inventory.set(itemId, updatedItem);
-    await this.saveInventoryToStorage();
-
-    return updatedItem;
   }
 
   async markAsUsed(itemId: string, notes?: string): Promise<boolean> {
-    const item = this.inventory.get(itemId);
-    if (!item) return false;
+    try {
+      const item = this.inventory.get(itemId);
+      if (!item) return false;
 
-    // Cancel existing notifications
-    for (const notificationId of item.notificationIds) {
-      await notificationService.cancelNotification(notificationId);
+      const updatedItem: InventoryItem = {
+        ...item,
+        status: 'used',
+        consumedDate: new Date().toISOString(),
+        lastUpdated: new Date().toISOString(),
+        notes: notes ? `${item.notes || ''}\n${notes}`.trim() : item.notes || '',
+      };
+
+      this.inventory.set(itemId, updatedItem);
+      await this.saveInventoryToStorage();
+      await this.updateWastePreventionStats(item, 'used');
+
+      // Cancel scheduled notifications
+      for (const notificationId of item.notificationIds) {
+        await notificationService.cancelNotification(notificationId);
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error marking item as used:', error);
+      return false;
     }
-
-    const updatedItem: InventoryItem = {
-      ...item,
-      status: 'used',
-      consumedDate: new Date().toISOString(),
-      lastUpdated: new Date().toISOString(),
-      notes: notes || item.notes,
-      notificationIds: [],
-    };
-
-    this.inventory.set(itemId, updatedItem);
-    await this.saveInventoryToStorage();
-
-    // Update waste prevention stats
-    await this.updateWastePreventionStats(item, 'used');
-
-    return true;
   }
 
   async shareInMarketplace(itemId: string): Promise<boolean> {
-    const item = this.inventory.get(itemId);
-    if (!item || item.status === 'expired' || item.status === 'used') {
+    try {
+      const item = this.inventory.get(itemId);
+      if (!item) return false;
+
+      const updatedItem = { ...item, sharedInMarketplace: true, lastUpdated: new Date().toISOString() };
+      this.inventory.set(itemId, updatedItem);
+      await this.saveInventoryToStorage();
+
+      return true;
+    } catch (error) {
+      console.error('Error sharing item in marketplace:', error);
       return false;
     }
-
-    const updatedItem: InventoryItem = {
-      ...item,
-      sharedInMarketplace: true,
-      lastUpdated: new Date().toISOString(),
-    };
-
-    this.inventory.set(itemId, updatedItem);
-    await this.saveInventoryToStorage();
-
-    return true;
-  }
-
-  async removeFromMarketplace(itemId: string): Promise<boolean> {
-    const item = this.inventory.get(itemId);
-    if (!item) return false;
-
-    const updatedItem: InventoryItem = {
-      ...item,
-      sharedInMarketplace: false,
-      lastUpdated: new Date().toISOString(),
-    };
-
-    this.inventory.set(itemId, updatedItem);
-    await this.saveInventoryToStorage();
-
-    return true;
-  }
-
-  async deleteItem(itemId: string): Promise<boolean> {
-    const item = this.inventory.get(itemId);
-    if (!item) return false;
-
-    // Cancel any scheduled notifications
-    for (const notificationId of item.notificationIds) {
-      await notificationService.cancelNotification(notificationId);
-    }
-
-    this.inventory.delete(itemId);
-    await this.saveInventoryToStorage();
-
-    return true;
   }
 
   getInventory(filters?: {

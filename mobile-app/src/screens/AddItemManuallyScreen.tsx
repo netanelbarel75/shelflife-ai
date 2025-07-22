@@ -1,5 +1,5 @@
-// mobile-app/src/screens/AddItemManuallyScreen.tsx
-import React, { useState, useEffect } from 'react';
+// src/screens/AddItemManuallyScreen.tsx - Updated for React Navigation
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -8,19 +8,13 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
-  Modal,
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-interface AddItemManuallyScreenProps {
-  isVisible: boolean;
-  onClose: () => void;
-  onItemAdded: (item: any) => void;
-}
+import { useNavigation } from '@react-navigation/native';
+import { inventoryService, InventoryItem } from '../services/InventoryService';
 
 const CATEGORIES = [
   { id: 'fruits', name: 'Fruits', icon: '🍎' },
@@ -44,683 +38,566 @@ const STORAGE_LOCATIONS = [
 
 const UNITS = ['pieces', 'kg', 'g', 'liters', 'ml', 'cups', 'tbsp', 'tsp', 'packages'];
 
-const AddItemManuallyScreen: React.FC<AddItemManuallyScreenProps> = ({
-  isVisible,
-  onClose,
-  onItemAdded,
-}) => {
+const AddItemManuallyScreen: React.FC = () => {
+  const navigation = useNavigation();
+  const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
-    category: '',
-    brand: '',
-    quantity: '1',
+    originalName: '',
+    category: 'other',
+    quantity: 1,
     unit: 'pieces',
-    storageLocation: 'fridge',
-    purchaseDate: new Date(),
-    expiryDate: null as Date | null,
+    location: 'fridge',
+    purchaseDate: new Date().toISOString().split('T')[0],
+    estimatedExpiryDate: '',
+    price: 0,
     notes: '',
-    estimatedPrice: '',
   });
-  const [loading, setLoading] = useState(false);
-  const [predictedExpiry, setPredictedExpiry] = useState<Date | null>(null);
-  const [showCategoryPicker, setShowCategoryPicker] = useState(false);
-  const [showUnitPicker, setShowUnitPicker] = useState(false);
-  const [showStoragePicker, setShowStoragePicker] = useState(false);
 
-  // Predict expiry date when item details change
-  useEffect(() => {
-    if (formData.name && formData.category) {
-      predictExpiryDate();
-    }
-  }, [formData.name, formData.category, formData.purchaseDate]);
-
-  const predictExpiryDate = async () => {
-    try {
-      const token = await AsyncStorage.getItem('access_token');
-      if (!token) return;
-
-      const response = await fetch('http://localhost:8000/api/inventory/predict-expiry', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          product_name: formData.name,
-          category: formData.category,
-          brand: formData.brand || null,
-          purchase_date: formData.purchaseDate.toISOString(),
-          storage_location: formData.storageLocation,
-        }),
-      });
-
-      if (response.ok) {
-        const prediction = await response.json();
-        setPredictedExpiry(new Date(prediction.predicted_expiry_date));
-        
-        // Auto-set expiry date if not manually set
-        if (!formData.expiryDate) {
-          setFormData(prev => ({
-            ...prev,
-            expiryDate: new Date(prediction.predicted_expiry_date)
-          }));
-        }
-      }
-    } catch (error) {
-      console.error('Failed to predict expiry:', error);
+  const updateField = (field: string, value: any) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+    
+    // Auto-update expiry date when category changes
+    if (field === 'category') {
+      const suggestedExpiryDate = getSuggestedExpiryDate(value);
+      setFormData(prev => ({ ...prev, estimatedExpiryDate: suggestedExpiryDate }));
     }
   };
 
-  const handleSubmit = async () => {
-    // Validation
+  const getSuggestedExpiryDate = (category: string): string => {
+    const today = new Date();
+    let daysToAdd = 7; // Default
+
+    switch (category) {
+      case 'fruits':
+        daysToAdd = 5;
+        break;
+      case 'vegetables':
+        daysToAdd = 7;
+        break;
+      case 'dairy':
+        daysToAdd = 5;
+        break;
+      case 'meat':
+        daysToAdd = 2;
+        break;
+      case 'bakery':
+        daysToAdd = 3;
+        break;
+      case 'pantry':
+        daysToAdd = 365;
+        break;
+      case 'frozen':
+        daysToAdd = 90;
+        break;
+      case 'beverages':
+        daysToAdd = 30;
+        break;
+      case 'snacks':
+        daysToAdd = 30;
+        break;
+      default:
+        daysToAdd = 7;
+    }
+
+    const suggestedDate = new Date(today.getTime() + daysToAdd * 24 * 60 * 60 * 1000);
+    return suggestedDate.toISOString().split('T')[0];
+  };
+
+  const validateForm = (): boolean => {
     if (!formData.name.trim()) {
-      Alert.alert('Error', 'Please enter item name');
-      return;
-    }
-    if (!formData.category) {
-      Alert.alert('Error', 'Please select a category');
-      return;
-    }
-    if (!formData.quantity.trim() || isNaN(parseFloat(formData.quantity))) {
-      Alert.alert('Error', 'Please enter a valid quantity');
-      return;
+      Alert.alert('Error', 'Please enter a product name');
+      return false;
     }
 
-    setLoading(true);
+    if (!formData.estimatedExpiryDate) {
+      Alert.alert('Error', 'Please select an expiry date');
+      return false;
+    }
+
+    if (new Date(formData.estimatedExpiryDate) <= new Date(formData.purchaseDate)) {
+      Alert.alert('Error', 'Expiry date must be after purchase date');
+      return false;
+    }
+
+    if (formData.quantity <= 0) {
+      Alert.alert('Error', 'Quantity must be greater than 0');
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleSaveItem = async () => {
+    if (!validateForm()) return;
+
     try {
-      const token = await AsyncStorage.getItem('access_token');
-      if (!token) {
-        Alert.alert('Error', 'Please login to add items');
-        return;
-      }
-
-      const itemData = {
-        name: formData.name.trim(),
-        category: formData.category,
-        brand: formData.brand.trim() || null,
-        quantity: parseFloat(formData.quantity),
+      setLoading(true);
+      
+      // Add to inventory using the service - create a single item directly
+      const success = await inventoryService.addItem({
+        name: formData.name,
+        originalName: formData.originalName || formData.name,
+        category: formData.category as any,
+        quantity: formData.quantity,
         unit: formData.unit,
-        storage_location: formData.storageLocation,
-        purchase_date: formData.purchaseDate.toISOString(),
-        predicted_expiry_date: formData.expiryDate?.toISOString() || null,
-        notes: formData.notes.trim() || null,
-        estimated_price: formData.estimatedPrice ? parseFloat(formData.estimatedPrice) : null,
-        source: 'manual'
-      };
-
-      const response = await fetch('http://localhost:8000/api/inventory/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify(itemData),
+        location: formData.location as any,
+        estimatedExpiryDate: formData.estimatedExpiryDate,
+        price: formData.price,
+        notes: formData.notes,
       });
 
-      if (response.ok) {
-        const newItem = await response.json();
-        Alert.alert(
-          'Success! 🎉',
-          `${formData.name} has been added to your inventory.`,
-          [
-            {
-              text: 'Add Another',
-              onPress: () => resetForm(),
-            },
-            {
-              text: 'Done',
-              onPress: () => {
-                onItemAdded(newItem);
-                resetForm();
-                onClose();
-              },
-            },
-          ]
-        );
-      } else {
-        const error = await response.json();
-        Alert.alert('Error', error.detail || 'Failed to add item');
+      if (!success) {
+        throw new Error('Failed to add item to inventory');
       }
+      
+      Alert.alert(
+        'Success! 🎉',
+        `"${formData.name}" has been added to your inventory.`,
+        [
+          {
+            text: 'Add Another',
+            onPress: () => {
+              // Reset form
+              setFormData({
+                name: '',
+                originalName: '',
+                category: 'other',
+                quantity: 1,
+                unit: 'pieces',
+                location: 'fridge',
+                purchaseDate: new Date().toISOString().split('T')[0],
+                estimatedExpiryDate: '',
+                price: 0,
+                notes: '',
+              });
+            },
+          },
+          {
+            text: 'Go to Inventory',
+            onPress: () => navigation.goBack(),
+            style: 'default',
+          },
+        ]
+      );
     } catch (error) {
-      console.error('Add item error:', error);
-      Alert.alert('Error', 'Network error. Please try again.');
+      console.error('Error adding item:', error);
+      Alert.alert('Error', 'Failed to add item to inventory. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  const resetForm = () => {
-    setFormData({
-      name: '',
-      category: '',
-      brand: '',
-      quantity: '1',
-      unit: 'pieces',
-      storageLocation: 'fridge',
-      purchaseDate: new Date(),
-      expiryDate: null,
-      notes: '',
-      estimatedPrice: '',
-    });
-    setPredictedExpiry(null);
-  };
-
-  const formatDate = (date: Date) => {
-    return date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-  };
-
-  const getCategoryName = (id: string) => {
-    const category = CATEGORIES.find(c => c.id === id);
-    return category ? `${category.icon} ${category.name}` : 'Select Category';
-  };
-
-  const getStorageName = (id: string) => {
-    const storage = STORAGE_LOCATIONS.find(s => s.id === id);
-    return storage ? `${storage.icon} ${storage.name}` : 'Select Storage';
-  };
-
   return (
-    <Modal
-      visible={isVisible}
-      animationType="slide"
-      presentationStyle="pageSheet"
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
+      <ScrollView style={styles.scrollView} keyboardShouldPersistTaps="handled">
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-            <Ionicons name="close" size={24} color="#666" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Add Item Manually</Text>
-          <TouchableOpacity
-            onPress={handleSubmit}
-            disabled={loading || !formData.name.trim() || !formData.category}
-            style={[
-              styles.saveButton,
-              (loading || !formData.name.trim() || !formData.category) && styles.saveButtonDisabled
-            ]}
-          >
-            {loading ? (
-              <ActivityIndicator size="small" color="white" />
-            ) : (
-              <Text style={[
-                styles.saveButtonText,
-                (loading || !formData.name.trim() || !formData.category) && styles.saveButtonTextDisabled
-              ]}>
-                Add Item
-              </Text>
-            )}
-          </TouchableOpacity>
+          <Text style={styles.title}>Add New Item</Text>
+          <Text style={styles.subtitle}>
+            Add items manually with smart expiry predictions
+          </Text>
         </View>
 
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-          {/* Basic Information */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>📋 Basic Information</Text>
-            
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Item Name *</Text>
-              <TextInput
-                style={styles.textInput}
-                value={formData.name}
-                onChangeText={(text) => setFormData(prev => ({ ...prev, name: text }))}
-                placeholder="e.g., Organic Bananas"
-                autoFocus
-                editable={!loading}
-              />
-            </View>
+        {/* Form */}
+        <View style={styles.form}>
+          {/* Item Name */}
+          <View style={styles.fieldContainer}>
+            <Text style={styles.label}>
+              Item Name <Text style={styles.required}>*</Text>
+            </Text>
+            <TextInput
+              style={styles.textInput}
+              placeholder="e.g. Bananas, Milk, Chicken breast"
+              value={formData.name}
+              onChangeText={(text) => updateField('name', text)}
+              returnKeyType="next"
+              autoCapitalize="words"
+            />
+          </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Category *</Text>
-              <TouchableOpacity
-                style={styles.pickerButton}
-                onPress={() => setShowCategoryPicker(true)}
-                disabled={loading}
-              >
-                <Text style={[styles.pickerText, !formData.category && styles.placeholderText]}>
-                  {formData.category ? getCategoryName(formData.category) : 'Select Category'}
-                </Text>
-                <Ionicons name="chevron-down" size={20} color="#666" />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Brand (Optional)</Text>
-              <TextInput
-                style={styles.textInput}
-                value={formData.brand}
-                onChangeText={(text) => setFormData(prev => ({ ...prev, brand: text }))}
-                placeholder="e.g., Dole"
-                editable={!loading}
-              />
+          {/* Category Selection */}
+          <View style={styles.fieldContainer}>
+            <Text style={styles.label}>Category</Text>
+            <View style={styles.categoryGrid}>
+              {CATEGORIES.map((category) => (
+                <TouchableOpacity
+                  key={category.id}
+                  style={[
+                    styles.categoryButton,
+                    formData.category === category.id && styles.categoryButtonActive,
+                  ]}
+                  onPress={() => updateField('category', category.id)}
+                >
+                  <Text style={styles.categoryIcon}>{category.icon}</Text>
+                  <Text
+                    style={[
+                      styles.categoryText,
+                      formData.category === category.id && styles.categoryTextActive,
+                    ]}
+                  >
+                    {category.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
 
-          {/* Quantity & Storage */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>📦 Quantity & Storage</Text>
-            
-            <View style={styles.row}>
-              <View style={[styles.inputGroup, styles.flex1, styles.marginRight]}>
-                <Text style={styles.inputLabel}>Quantity *</Text>
-                <TextInput
-                  style={styles.textInput}
-                  value={formData.quantity}
-                  onChangeText={(text) => setFormData(prev => ({ ...prev, quantity: text }))}
-                  placeholder="1"
-                  keyboardType="decimal-pad"
-                  editable={!loading}
-                />
-              </View>
-              
-              <View style={[styles.inputGroup, styles.flex1]}>
-                <Text style={styles.inputLabel}>Unit</Text>
+          {/* Quantity and Unit */}
+          <View style={styles.rowContainer}>
+            <View style={[styles.fieldContainer, styles.flexHalf]}>
+              <Text style={styles.label}>Quantity</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="1"
+                value={formData.quantity.toString()}
+                onChangeText={(text) => updateField('quantity', parseInt(text) || 1)}
+                keyboardType="numeric"
+                returnKeyType="next"
+              />
+            </View>
+            <View style={[styles.fieldContainer, styles.flexHalf]}>
+              <Text style={styles.label}>Unit</Text>
+              <View style={styles.pickerContainer}>
                 <TouchableOpacity
                   style={styles.pickerButton}
-                  onPress={() => setShowUnitPicker(true)}
-                  disabled={loading}
+                  onPress={() => {
+                    Alert.alert(
+                      'Select Unit',
+                      'Choose a unit for this item',
+                      UNITS.map((unit) => ({
+                        text: unit,
+                        onPress: () => updateField('unit', unit),
+                      }))
+                    );
+                  }}
                 >
                   <Text style={styles.pickerText}>{formData.unit}</Text>
                   <Ionicons name="chevron-down" size={20} color="#666" />
                 </TouchableOpacity>
               </View>
             </View>
+          </View>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Storage Location</Text>
-              <TouchableOpacity
-                style={styles.pickerButton}
-                onPress={() => setShowStoragePicker(true)}
-                disabled={loading}
-              >
-                <Text style={styles.pickerText}>
-                  {getStorageName(formData.storageLocation)}
-                </Text>
-                <Ionicons name="chevron-down" size={20} color="#666" />
-              </TouchableOpacity>
+          {/* Storage Location */}
+          <View style={styles.fieldContainer}>
+            <Text style={styles.label}>Storage Location</Text>
+            <View style={styles.locationGrid}>
+              {STORAGE_LOCATIONS.map((location) => (
+                <TouchableOpacity
+                  key={location.id}
+                  style={[
+                    styles.locationButton,
+                    formData.location === location.id && styles.locationButtonActive,
+                  ]}
+                  onPress={() => updateField('location', location.id)}
+                >
+                  <Text style={styles.locationIcon}>{location.icon}</Text>
+                  <Text
+                    style={[
+                      styles.locationText,
+                      formData.location === location.id && styles.locationTextActive,
+                    ]}
+                  >
+                    {location.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
 
           {/* Dates */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>📅 Important Dates</Text>
-            
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Purchase Date</Text>
-              <View style={styles.dateButton}>
-                <Ionicons name="calendar-outline" size={20} color="#666" />
-                <Text style={styles.dateText}>{formatDate(formData.purchaseDate)}</Text>
-              </View>
-            </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>
-                Expiry Date
-                {predictedExpiry && (
-                  <Text style={styles.predictedLabel}> (AI Predicted)</Text>
-                )}
-              </Text>
-              <View style={styles.dateButton}>
-                <Ionicons name="time-outline" size={20} color="#666" />
-                <Text style={[
-                  styles.dateText,
-                  !formData.expiryDate && styles.placeholderText
-                ]}>
-                  {formData.expiryDate ? formatDate(formData.expiryDate) : 'AI will predict this'}
-                </Text>
-              </View>
-              
-              {predictedExpiry && (
-                <TouchableOpacity
-                  style={styles.aiButton}
-                  onPress={() => setFormData(prev => ({ ...prev, expiryDate: predictedExpiry }))}
-                  disabled={loading}
-                >
-                  <Text style={styles.aiButtonText}>
-                    🤖 Use AI Prediction ({formatDate(predictedExpiry)})
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
-
-          {/* Optional Details */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>💡 Additional Details</Text>
-            
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Estimated Price (₪)</Text>
+          <View style={styles.rowContainer}>
+            <View style={[styles.fieldContainer, styles.flexHalf]}>
+              <Text style={styles.label}>Purchase Date</Text>
               <TextInput
                 style={styles.textInput}
-                value={formData.estimatedPrice}
-                onChangeText={(text) => setFormData(prev => ({ ...prev, estimatedPrice: text }))}
-                placeholder="e.g., 12.50"
-                keyboardType="decimal-pad"
-                editable={!loading}
+                placeholder="YYYY-MM-DD"
+                value={formData.purchaseDate}
+                onChangeText={(text) => updateField('purchaseDate', text)}
+                keyboardType="default"
+                maxLength={10}
               />
             </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Notes</Text>
+            <View style={[styles.fieldContainer, styles.flexHalf]}>
+              <Text style={styles.label}>
+                Expiry Date <Text style={styles.required}>*</Text>
+              </Text>
               <TextInput
-                style={[styles.textInput, styles.textArea]}
-                value={formData.notes}
-                onChangeText={(text) => setFormData(prev => ({ ...prev, notes: text }))}
-                placeholder="Any additional notes..."
-                multiline
-                numberOfLines={3}
-                textAlignVertical="top"
-                editable={!loading}
+                style={[
+                  styles.textInput,
+                  formData.estimatedExpiryDate && styles.textInputFilled,
+                ]}
+                placeholder="YYYY-MM-DD"
+                value={formData.estimatedExpiryDate}
+                onChangeText={(text) => updateField('estimatedExpiryDate', text)}
+                keyboardType="default"
+                maxLength={10}
               />
+              {formData.estimatedExpiryDate && (
+                <Text style={styles.helperText}>
+                  {Math.ceil(
+                    (new Date(formData.estimatedExpiryDate).getTime() -
+                      new Date().getTime()) /
+                      (1000 * 60 * 60 * 24)
+                  )}{' '}
+                  days from now
+                </Text>
+              )}
             </View>
           </View>
-        </ScrollView>
 
-        {/* Category Picker Modal */}
-        <PickerModal
-          visible={showCategoryPicker}
-          title="Select Category"
-          options={CATEGORIES.map(cat => ({ id: cat.id, name: `${cat.icon} ${cat.name}` }))}
-          selectedValue={formData.category}
-          onSelect={(value) => {
-            setFormData(prev => ({ ...prev, category: value }));
-            setShowCategoryPicker(false);
-          }}
-          onClose={() => setShowCategoryPicker(false)}
-        />
+          {/* Price */}
+          <View style={styles.fieldContainer}>
+            <Text style={styles.label}>Price (optional)</Text>
+            <TextInput
+              style={styles.textInput}
+              placeholder="0.00"
+              value={formData.price.toString()}
+              onChangeText={(text) => updateField('price', parseFloat(text) || 0)}
+              keyboardType="decimal-pad"
+              returnKeyType="next"
+            />
+          </View>
 
-        {/* Unit Picker Modal */}
-        <PickerModal
-          visible={showUnitPicker}
-          title="Select Unit"
-          options={UNITS.map(unit => ({ id: unit, name: unit }))}
-          selectedValue={formData.unit}
-          onSelect={(value) => {
-            setFormData(prev => ({ ...prev, unit: value }));
-            setShowUnitPicker(false);
-          }}
-          onClose={() => setShowUnitPicker(false)}
-        />
+          {/* Notes */}
+          <View style={styles.fieldContainer}>
+            <Text style={styles.label}>Notes (optional)</Text>
+            <TextInput
+              style={[styles.textInput, styles.textInputMultiline]}
+              placeholder="Any additional notes about this item..."
+              value={formData.notes}
+              onChangeText={(text) => updateField('notes', text)}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+            />
+          </View>
+        </View>
 
-        {/* Storage Picker Modal */}
-        <PickerModal
-          visible={showStoragePicker}
-          title="Select Storage Location"
-          options={STORAGE_LOCATIONS.map(loc => ({ id: loc.id, name: `${loc.icon} ${loc.name}` }))}
-          selectedValue={formData.storageLocation}
-          onSelect={(value) => {
-            setFormData(prev => ({ ...prev, storageLocation: value }));
-            setShowStoragePicker(false);
-          }}
-          onClose={() => setShowStoragePicker(false)}
-        />
-      </KeyboardAvoidingView>
-    </Modal>
+        {/* Action Buttons */}
+        <View style={styles.buttonContainer}>
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={() => navigation.goBack()}
+            disabled={loading}
+          >
+            <Text style={styles.secondaryButtonText}>Cancel</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.primaryButton, loading && styles.primaryButtonDisabled]}
+            onPress={handleSaveItem}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="white" size="small" />
+            ) : (
+              <>
+                <Ionicons name="checkmark" size={20} color="white" />
+                <Text style={styles.primaryButtonText}>Add Item</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 };
-
-// Generic Picker Modal Component
-interface PickerModalProps {
-  visible: boolean;
-  title: string;
-  options: { id: string; name: string }[];
-  selectedValue: string;
-  onSelect: (value: string) => void;
-  onClose: () => void;
-}
-
-const PickerModal: React.FC<PickerModalProps> = ({
-  visible,
-  title,
-  options,
-  selectedValue,
-  onSelect,
-  onClose,
-}) => (
-  <Modal
-    visible={visible}
-    transparent
-    animationType="slide"
-  >
-    <View style={styles.modalOverlay}>
-      <View style={styles.pickerModal}>
-        <View style={styles.pickerHeader}>
-          <TouchableOpacity onPress={onClose}>
-            <Text style={styles.pickerCancel}>Cancel</Text>
-          </TouchableOpacity>
-          <Text style={styles.pickerTitle}>{title}</Text>
-          <View style={styles.pickerHeaderSpacer} />
-        </View>
-        
-        <ScrollView style={styles.pickerOptions}>
-          {options.map((option) => (
-            <TouchableOpacity
-              key={option.id}
-              style={styles.pickerOption}
-              onPress={() => onSelect(option.id)}
-            >
-              <Text style={[
-                styles.pickerOptionText,
-                selectedValue === option.id && styles.pickerOptionSelected
-              ]}>
-                {option.name}
-              </Text>
-              {selectedValue === option.id && (
-                <Ionicons name="checkmark" size={20} color="#4CAF50" />
-              )}
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
-    </View>
-  </Modal>
-);
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f8f9fa',
   },
+  scrollView: {
+    flex: 1,
+  },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    padding: 20,
     backgroundColor: 'white',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
   },
-  closeButton: {
-    padding: 4,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
     color: '#333',
+    marginBottom: 4,
   },
-  saveButton: {
-    backgroundColor: '#4CAF50',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    minWidth: 80,
-    alignItems: 'center',
+  subtitle: {
+    fontSize: 16,
+    color: '#666',
   },
-  saveButtonDisabled: {
-    backgroundColor: '#e0e0e0',
+  form: {
+    padding: 20,
   },
-  saveButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: 'white',
+  fieldContainer: {
+    marginBottom: 20,
   },
-  saveButtonTextDisabled: {
-    color: '#999',
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 20,
-  },
-  section: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    marginVertical: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  sectionTitle: {
+  label: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
-    marginBottom: 16,
-  },
-  inputGroup: {
-    marginBottom: 16,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '500',
     color: '#333',
     marginBottom: 8,
   },
-  predictedLabel: {
-    fontSize: 12,
-    color: '#4CAF50',
-    fontWeight: '400',
+  required: {
+    color: '#FF6B6B',
   },
   textInput: {
-    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 12,
     fontSize: 16,
+    backgroundColor: 'white',
+    color: '#333',
+  },
+  textInputFilled: {
+    borderColor: '#4CAF50',
+    backgroundColor: '#f8fff8',
+  },
+  textInputMultiline: {
+    height: 80,
+  },
+  helperText: {
+    fontSize: 12,
+    color: '#4CAF50',
+    marginTop: 4,
+    fontWeight: '500',
+  },
+  categoryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  categoryButton: {
+    width: '31%',
+    aspectRatio: 1,
+    backgroundColor: 'white',
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: '#e0e0e0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
   },
-  textArea: {
-    height: 80,
-    paddingTop: 12,
+  categoryButtonActive: {
+    borderColor: '#4CAF50',
+    backgroundColor: '#f8fff8',
   },
-  pickerButton: {
-    backgroundColor: '#f8f9fa',
+  categoryIcon: {
+    fontSize: 24,
+    marginBottom: 4,
+  },
+  categoryText: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+  },
+  categoryTextActive: {
+    color: '#4CAF50',
+    fontWeight: '600',
+  },
+  locationGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  locationButton: {
+    width: '48%',
+    backgroundColor: 'white',
     borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    padding: 12,
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 8,
+  },
+  locationButtonActive: {
+    borderColor: '#4CAF50',
+    backgroundColor: '#f8fff8',
+  },
+  locationIcon: {
+    fontSize: 20,
+    marginRight: 8,
+  },
+  locationText: {
+    fontSize: 14,
+    color: '#666',
+    flex: 1,
+  },
+  locationTextActive: {
+    color: '#4CAF50',
+    fontWeight: '600',
+  },
+  rowContainer: {
+    flexDirection: 'row',
     justifyContent: 'space-between',
+  },
+  flexHalf: {
+    width: '48%',
+  },
+  pickerContainer: {
     borderWidth: 1,
     borderColor: '#e0e0e0',
+    borderRadius: 8,
+    backgroundColor: 'white',
+  },
+  pickerButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
   },
   pickerText: {
     fontSize: 16,
     color: '#333',
   },
-  placeholderText: {
-    color: '#999',
-  },
-  dateButton: {
-    backgroundColor: '#f8f9fa',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+  buttonContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
+    padding: 20,
+    paddingTop: 10,
+    gap: 12,
+  },
+  secondaryButton: {
+    flex: 1,
+    backgroundColor: 'white',
     borderWidth: 1,
     borderColor: '#e0e0e0',
-  },
-  dateText: {
-    fontSize: 16,
-    color: '#333',
-    marginLeft: 8,
-  },
-  aiButton: {
-    backgroundColor: '#e8f5e8',
     borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    marginTop: 8,
-    borderWidth: 1,
-    borderColor: '#4CAF50',
-  },
-  aiButtonText: {
-    fontSize: 14,
-    color: '#2E7D32',
-    textAlign: 'center',
-    fontWeight: '500',
-  },
-  row: {
-    flexDirection: 'row',
-  },
-  flex1: {
-    flex: 1,
-  },
-  marginRight: {
-    marginRight: 8,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  pickerModal: {
-    backgroundColor: 'white',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '70%',
-  },
-  pickerHeader: {
-    flexDirection: 'row',
+    paddingVertical: 14,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    justifyContent: 'center',
   },
-  pickerCancel: {
+  secondaryButtonText: {
     fontSize: 16,
+    fontWeight: '600',
     color: '#666',
   },
-  pickerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-  },
-  pickerHeaderSpacer: {
-    width: 60,
-  },
-  pickerOptions: {
-    maxHeight: 300,
-  },
-  pickerOption: {
+  primaryButton: {
+    flex: 2,
+    backgroundColor: '#4CAF50',
+    borderRadius: 8,
+    paddingVertical: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    justifyContent: 'center',
+    gap: 8,
   },
-  pickerOptionText: {
+  primaryButtonDisabled: {
+    backgroundColor: '#a5d6a7',
+  },
+  primaryButtonText: {
     fontSize: 16,
-    color: '#333',
-  },
-  pickerOptionSelected: {
-    color: '#4CAF50',
-    fontWeight: '600',
+    fontWeight: 'bold',
+    color: 'white',
   },
 });
 

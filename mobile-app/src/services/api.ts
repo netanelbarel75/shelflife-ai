@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // API Configuration
 const API_BASE_URL = __DEV__ 
-  ? 'http://localhost:8000/api/v1'  // Development
+  ? 'http://localhost:8000/api'  // Development - matches backend routes
   : 'https://api.shelflife.ai/api/v1';  // Production
 
 // Storage keys
@@ -35,7 +35,7 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
   (response: AxiosResponse) => response,
   async (error: AxiosError) => {
-    const originalRequest = error.config;
+    const originalRequest = error.config as any; // Cast to any to avoid _retry property issue
     
     if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
       originalRequest._retry = true;
@@ -43,15 +43,18 @@ apiClient.interceptors.response.use(
       try {
         const refreshToken = await AsyncStorage.getItem(REFRESH_TOKEN_KEY);
         if (refreshToken) {
-          const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
-            refresh_token: refreshToken,
+          const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {}, {
+            headers: { Authorization: `Bearer ${refreshToken}` }
           });
           
-          const { access_token } = response.data;
-          await AsyncStorage.setItem(ACCESS_TOKEN_KEY, access_token);
+          const tokenData = response.data;
+          await AsyncStorage.setItem(ACCESS_TOKEN_KEY, tokenData.access_token);
+          if (tokenData.refresh_token) {
+            await AsyncStorage.setItem(REFRESH_TOKEN_KEY, tokenData.refresh_token);
+          }
           
           // Retry original request with new token
-          originalRequest.headers.Authorization = `Bearer ${access_token}`;
+          originalRequest.headers.Authorization = `Bearer ${tokenData.access_token}`;
           return axios(originalRequest);
         }
       } catch (refreshError) {

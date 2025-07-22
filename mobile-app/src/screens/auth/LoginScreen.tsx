@@ -13,17 +13,19 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import authService from '../../services/authService';
 
 interface LoginScreenProps {
-  onLoginSuccess: (user: any) => void;
+  onLoginSuccess: (credentials: { email: string; password: string }) => Promise<void>;
+  onGoogleLogin: () => Promise<void>;
   onNavigateToRegister: () => void;
+  onError: (error: string) => void;
 }
 
 const LoginScreen: React.FC<LoginScreenProps> = ({
   onLoginSuccess,
+  onGoogleLogin,
   onNavigateToRegister,
+  onError,
 }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -32,39 +34,15 @@ const LoginScreen: React.FC<LoginScreenProps> = ({
 
   const handleEmailLogin = async () => {
     if (!email.trim() || !password.trim()) {
-      Alert.alert('Error', 'Please enter both email and password');
+      onError('Please enter both email and password');
       return;
     }
 
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:8000/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email: email.trim(),
-          password: password,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        // Store tokens
-        await AsyncStorage.setItem('access_token', data.access_token);
-        if (data.refresh_token) {
-          await AsyncStorage.setItem('refresh_token', data.refresh_token);
-        }
-        
-        onLoginSuccess(data.user);
-      } else {
-        Alert.alert('Login Failed', data.detail || 'Invalid credentials');
-      }
-    } catch (error) {
-      console.error('Login error:', error);
-      Alert.alert('Error', 'Network error. Please try again.');
+      await onLoginSuccess({ email: email.trim(), password });
+    } catch (error: any) {
+      onError(error.message || 'Login failed');
     } finally {
       setLoading(false);
     }
@@ -73,25 +51,9 @@ const LoginScreen: React.FC<LoginScreenProps> = ({
   const handleGoogleLogin = async () => {
     setLoading(true);
     try {
-      const { user, token } = await authService.googleLogin();
-      
-      // Show demo mode alert for Google login
-      if (user.id === 'google-demo-user') {
-        Alert.alert(
-          '🎮 Demo Google Login',
-          'You\'re now logged in with a demo Google account! This simulates the Google OAuth flow.',
-          [{ text: 'Continue', onPress: () => onLoginSuccess(user) }]
-        );
-      } else {
-        onLoginSuccess(user);
-      }
+      await onGoogleLogin();
     } catch (error: any) {
-      console.error('Google login error:', error);
-      Alert.alert(
-        'Google Login Failed',
-        error.message || 'Unable to sign in with Google. Please try again.',
-        [{ text: 'OK' }]
-      );
+      onError(error.message || 'Google login failed');
     } finally {
       setLoading(false);
     }
@@ -211,13 +173,22 @@ const LoginScreen: React.FC<LoginScreenProps> = ({
 
 // Register Screen Component
 interface RegisterScreenProps {
-  onRegisterSuccess: (user: any) => void;
+  onRegisterSuccess: (userData: {
+    email: string;
+    password: string;
+    username: string;
+    full_name?: string;
+  }) => Promise<void>;
+  onGoogleLogin: () => Promise<void>;
   onNavigateToLogin: () => void;
+  onError: (error: string) => void;
 }
 
 const RegisterScreen: React.FC<RegisterScreenProps> = ({
   onRegisterSuccess,
+  onGoogleLogin,
   onNavigateToLogin,
+  onError,
 }) => {
   const [formData, setFormData] = useState({
     fullName: '',
@@ -233,66 +204,50 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({
   const handleRegister = async () => {
     // Validation
     if (!formData.fullName.trim()) {
-      Alert.alert('Error', 'Please enter your full name');
+      onError('Please enter your full name');
       return;
     }
     if (!formData.username.trim()) {
-      Alert.alert('Error', 'Please choose a username');
+      onError('Please choose a username');
       return;
     }
     if (!formData.email.trim()) {
-      Alert.alert('Error', 'Please enter your email');
+      onError('Please enter your email');
       return;
     }
     if (formData.password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
+      onError('Password must be at least 6 characters');
       return;
     }
     if (formData.password !== formData.confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match');
+      onError('Passwords do not match');
       return;
     }
 
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:8000/api/auth/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          full_name: formData.fullName,
-          username: formData.username,
-          email: formData.email,
-          password: formData.password,
-        }),
+      await onRegisterSuccess({
+        email: formData.email,
+        password: formData.password,
+        username: formData.username,
+        full_name: formData.fullName,
       });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        Alert.alert(
-          'Success!',
-          'Account created successfully. Please sign in.',
-          [{ text: 'OK', onPress: onNavigateToLogin }]
-        );
-      } else {
-        Alert.alert('Registration Failed', data.detail || 'Please try again');
-      }
-    } catch (error) {
-      console.error('Registration error:', error);
-      Alert.alert('Error', 'Network error. Please try again.');
+    } catch (error: any) {
+      onError(error.message || 'Registration failed');
     } finally {
       setLoading(false);
     }
   };
 
   const handleGoogleRegister = async () => {
-    Alert.alert(
-      'Google Sign Up',
-      'Google sign up feature is coming soon! For now, please use email/password registration.',
-      [{ text: 'OK' }]
-    );
+    setLoading(true);
+    try {
+      await onGoogleLogin();
+    } catch (error: any) {
+      onError(error.message || 'Google registration failed');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
