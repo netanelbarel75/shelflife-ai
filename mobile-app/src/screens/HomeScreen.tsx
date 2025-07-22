@@ -184,25 +184,16 @@ const HomeScreen: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Logout',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await logout();
-            } catch (error) {
-              console.error('Logout error:', error);
-              Alert.alert('Error', 'Failed to logout. Please try again.');
-            }
-          },
-        },
-      ]
-    );
+    console.log('🏠 Home: handleLogout called');
+    try {
+      // Use the new modal-based logout (no browser popup blocking)
+      console.log('🏠 Home: About to call logout(true)');
+      await logout(true); // true = show custom confirmation modal
+      console.log('🏠 Home: logout completed');
+    } catch (error: any) {
+      console.log('🏠 Home: ERROR in handleLogout:', error);
+      Alert.alert('Logout Error', error.message || 'Failed to logout');
+    }
   };
 
   if (loading && !refreshing) {

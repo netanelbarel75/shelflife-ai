@@ -41,22 +41,38 @@ const ProfileScreen: React.FC = () => {
     carbonOffset: '18.7 lbs CO₂',
   };
 
-  const handleLogout = () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Logout', style: 'destructive', onPress: async () => {
-          try {
-            await logout();
-            Alert.alert('Logged out', 'You have been logged out successfully.');
-          } catch (error: any) {
-            Alert.alert('Logout Error', error.message || 'Failed to logout');
-          }
-        }},
-      ]
-    );
+  const handleLogout = async () => {
+    console.log('📋 Profile: handleLogout called');
+    try {
+      // Use the improved logout with confirmation dialog
+      console.log('📋 Profile: About to call logout(true)');
+      await logout(true); // true = show confirmation dialog
+      console.log('📋 Profile: logout completed');
+    } catch (error: any) {
+      console.log('📋 Profile: ERROR in handleLogout:', error);
+      Alert.alert('Logout Error', error.message || 'Failed to logout');
+    }
+  };
+
+  const handleEmergencyLogout = async () => {
+    console.log('📋 Profile: handleEmergencyLogout called');
+    try {
+      // Emergency logout without confirmation (for debugging)
+      console.log('📋 Profile: About to call logout(false)');
+      await logout(false); // false = no confirmation
+      console.log('📋 Profile: emergency logout completed');
+    } catch (error: any) {
+      console.log('📋 Profile: ERROR in handleEmergencyLogout:', error);
+      Alert.alert('Emergency Logout Error', error.message || 'Failed to logout');
+    }
+  };
+  
+  // Simple test for debugging
+  const handleSimpleTest = () => {
+    console.log('🧪 Testing if button tap works!');
+    Alert.alert('Test', 'Button tap works! Now testing logout...');
+    console.log('User object:', user);
+    console.log('Logout function:', typeof logout);
   };
 
   const handleDeleteAccount = () => {
@@ -274,6 +290,22 @@ const ProfileScreen: React.FC = () => {
             <Ionicons name="trash" size={24} color="#FF6B6B" />
             <Text style={styles.deleteText}>Delete Account</Text>
           </TouchableOpacity>
+          
+          {/* Debug: Emergency logout for testing */}
+          {__DEV__ && (
+            <>
+              <TouchableOpacity style={styles.emergencyButton} onPress={handleEmergencyLogout}>
+                <Ionicons name="warning" size={24} color="#FF9800" />
+                <Text style={styles.emergencyText}>Emergency Logout (No Confirm)</Text>
+              </TouchableOpacity>
+              
+              {/* Simple test button */}
+              <TouchableOpacity style={styles.testButton} onPress={handleSimpleTest}>
+                <Ionicons name="flask" size={24} color="#2196F3" />
+                <Text style={styles.testText}>🧪 Test Button Tap</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       </View>
 
@@ -448,6 +480,36 @@ const styles = StyleSheet.create({
   deleteText: {
     fontSize: 16,
     color: '#FF6B6B',
+    marginLeft: 12,
+    fontWeight: '500',
+  },
+  emergencyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#FFF3E0',
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  emergencyText: {
+    fontSize: 14,
+    color: '#FF9800',
+    marginLeft: 12,
+    fontWeight: '500',
+  },
+  testButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#E3F2FD',
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  testText: {
+    fontSize: 14,
+    color: '#2196F3',
     marginLeft: 12,
     fontWeight: '500',
   },

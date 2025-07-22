@@ -1,8 +1,10 @@
 // src/contexts/AuthContext.tsx - Global authentication state management
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import authService from '../services/authService';
 import { getAccessToken } from '../services/api';
+import ConfirmationModal from '../components/ConfirmationModal';
 
 // Use the User interface from types
 import { User } from '../services/types';
@@ -14,7 +16,7 @@ interface AuthContextType {
   login: (credentials: { email: string; password: string }) => Promise<void>;
   googleLogin: () => Promise<void>;
   register: (userData: { email: string; password: string; username: string; full_name?: string }) => Promise<void>;
-  logout: () => Promise<void>;
+  logout: (showConfirmation?: boolean) => Promise<void>;
   refreshAuth: () => Promise<void>;
 }
 
@@ -35,6 +37,7 @@ interface AuthProviderProps {
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
 
   const isAuthenticated = user !== null;
 
@@ -113,18 +116,57 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  const logout = async () => {
-    try {
-      setIsLoading(true);
-      await authService.logout();
-      await clearAuthData();
-    } catch (error) {
-      console.error('Logout error:', error);
-      // Even if server logout fails, clear local data
-      await clearAuthData();
-    } finally {
-      setIsLoading(false);
+  const logout = async (showConfirmation: boolean = true) => {
+    console.log('🔐 Starting logout process...', { showConfirmation });
+    
+    const performLogout = async () => {
+      try {
+        console.log('🔄 Setting loading state...');
+        setIsLoading(true);
+        
+        // Call backend logout (optional - local logout is more important)
+        try {
+          console.log('📡 Calling backend logout...');
+          await authService.logout();
+          console.log('✅ Backend logout successful');
+        } catch (error) {
+          console.warn('⚠️ Backend logout failed, but clearing local data anyway:', error);
+        }
+        
+        // Clear local auth data
+        console.log('🗑️ Clearing local auth data...');
+        await clearAuthData();
+        
+        console.log('✅ User logged out successfully');
+      } catch (error) {
+        console.error('❌ Logout error:', error);
+        // Even if anything fails, clear local data
+        await clearAuthData();
+      } finally {
+        console.log('🔄 Clearing loading state...');
+        setIsLoading(false);
+        setShowLogoutModal(false); // Close modal
+      }
+    };
+
+    if (showConfirmation) {
+      console.log('❓ Showing logout confirmation modal...');
+      setShowLogoutModal(true);
+    } else {
+      console.log('⚡ Performing logout without confirmation...');
+      await performLogout();
     }
+  };
+
+  const handleConfirmLogout = () => {
+    console.log('✅ User confirmed logout via modal');
+    setShowLogoutModal(false);
+    logout(false); // Call logout without confirmation since already confirmed
+  };
+
+  const handleCancelLogout = () => {
+    console.log('❌ User cancelled logout via modal');
+    setShowLogoutModal(false);
   };
 
   const refreshAuth = async () => {
@@ -145,6 +187,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   return (
     <AuthContext.Provider value={value}>
       {children}
+      
+      {/* Custom Logout Confirmation Modal - Won't be blocked by browser */}
+      <ConfirmationModal
+        visible={showLogoutModal}
+        title="Confirm Logout"
+        message="Are you sure you want to logout?"
+        confirmText="Logout"
+        cancelText="Cancel"
+        onConfirm={handleConfirmLogout}
+        onCancel={handleCancelLogout}
+        confirmColor="#f44336"
+        icon="log-out-outline"
+      />
     </AuthContext.Provider>
   );
 };
